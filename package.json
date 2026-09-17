@@ -8,7 +8,7 @@
   "author": "intisy",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/intisy-ai/opencode-proxy.git"
+    "url": "git+https://github.com/forebay/opencode-proxy.git"
   },
   "keywords": [
     "proxy",
