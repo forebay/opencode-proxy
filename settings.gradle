@@ -2,7 +2,7 @@ plugins {
     id "org.gradle.toolchains.foojay-resolver-convention" version "0.8.0"
 }
 
-rootProject.name = "opencode-proxy-java"
+rootProject.name = "opencode-proxy"
 
 // The routing vocabulary (:proxy-contracts), the IR types (:ir) and api's seam modules resolve as
 // published jars through github-gradle. opencode has no TeaVM logic to single-source (the passthrough
