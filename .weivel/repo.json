@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "importName": "opencode-proxy",
+  "description": "The front door for OpenCode, not yet moved onto the shared host.",
+  "topics": [
+    "ai",
+    "ai-proxy",
+    "app-proxy",
+    "forebay",
+    "llm",
+    "opencode",
+    "proxy",
+    "typescript"
+  ]
+}
