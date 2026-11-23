@@ -34,14 +34,12 @@
       "opencode": {
         "providerId": "forebay",
         "providerName": "forebay",
-        "baseURL": "https://opencode-proxy.invalid/v1",
-        "authToken": "sk-ant-loader-proxy"
+        "baseURL": "https://opencode-proxy.invalid/v1"
       },
       "routing": {
         "tierSourceProvider": "opencode",
         "tierOrder": [],
         "tierFallback": [],
-        "tierRegex": "$(.)",
         "defaultContext": 200000,
         "defaultOutput": 64000,
         "loginCommand": "forebay-host action opencode"

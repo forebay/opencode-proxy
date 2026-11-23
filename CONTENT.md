@@ -10,13 +10,16 @@ capability by id through its context, and reads its settings and writes its log 
 ## How OpenCode reaches it
 
 An in-process entry in OpenCode's plugin folder imports weivel/typescript's in-process bundle
-(`weivel-host-in-process.mjs`, with the pinned `node_modules/koffi` beside it), calls `startHost` over `runtime`, asks
+(`weivel-host-in-process.mjs`, with the pinned `node_modules/koffi` beside it), calls `startHost` over `runtime` with
+`<loader id> in-process`, a run that serves its own process and never claims the loader, so every OpenCode process
+hosts its own, asks
 the running host for the service `opencode-proxy:opencode-plugin` and returns what it answers to OpenCode. The service
 is a function from OpenCode's plugin input to its hooks. The entry names a service id, never proxy code.
 
 The `config` hook adds `config.provider.<providerId>` with `npm: "@ai-sdk/anthropic"`, the catalog's model entries
-with their context and output limits, and `options.fetch`, through which OpenCode's model client sends every request
-to this process. No config file is edited and `auth.json` is never written.
+with their context and output limits, `options.apiKey` the placeholder authorization (the model client refuses to run
+without a key), and `options.fetch`, through which OpenCode's model client sends every request to this process. No
+config file is edited and `auth.json` is never written.
 
 ## Structure
 
@@ -31,19 +34,20 @@ to this process. No config file is edited and `auth.json` is never written.
   C names when it fails after bytes went out; the stream is freed through the provider's `release_stream` when it
   offers one, OpenCode cancelling the request included.
 - `src/outlet.ts`: the Response a request answers, whole or streamed, and the caller going away.
-- `src/pass-through.ts`: `routing.pass_through` and `reply_headers`, and `routing.failure` for an unreachable upstream.
+- `src/pass-through.ts`: `routing.pass_through` and `reply_headers`, the answer reported rewritten since `fetch`
+  decodes a compressed body itself, and `routing.failure` for an unreachable upstream.
 - `src/catalog.ts`: the providers' models, kept by forebay-library's catalog object; it performs the asks and sets the
   timers C names and parks each request on the round C names.
 - `src/settings.ts`: each setting whole through `weivel.config`'s `get_tree`, and the settings file C names to the
   user from its `settings_file`.
-- `src/zone.ts`: the machine's zone offset and short name at an instant, from `Intl`, which C names a reset in.
+- `src/zone.ts`: the machine's zone offset and its en-US and en-GB short names at an instant, from `Intl`; C chooses
+  the name a reset is given in.
 
 ## Configuration
 
-`plugin.json`'s `config.defaults` hold `upstream`, the placeholder authorization the pass-through drops, OpenCode's
-provider id, name, base URL and the placeholder token its model client sends (as `Authorization: Bearer`), and the
-routing profile under `routing`: no tiers, every provider's models listed directly, the default limits and the login
-command the no-model reply names. A stored model map goes under `routing.modelMap`, each slot a list of
+`plugin.json`'s `config.defaults` hold `upstream`, the placeholder authorization OpenCode's model client is given as
+its key, OpenCode's provider id, name and base URL, and the routing profile under `routing`: no tier pattern, so every
+provider's models are listed directly, the default limits and the login command the no-model reply names. A stored model map goes under `routing.modelMap`, each slot a list of
 `{provider, model}`.
 
 ## Testing
@@ -56,8 +60,11 @@ command the no-model reply names. A stored model map goes under `routing.modelMa
   and calls the service's hooks and fetch directly.
 - `test/opencode.test.ts` installs the OpenCode version `test/opencode-version.json` names into a temporary
   directory, writes the in-process entry into an isolated OpenCode home, and runs `opencode models` and
-  `opencode run` against the test provider, asserting no listening socket, no `auth.json` and no change under the
-  real home's OpenCode folders. It needs the network for OpenCode's own install.
+  `opencode run` against the test provider, one OpenCode after another and two at once, asserting no JavaScript
+  listen after the entry loaded, the pinned koffi loaded, no `auth.json` or OpenCode config file, and no change under
+  the real home's OpenCode, Bun and npm folders.
+- The OpenCode cases need the network: npm installs `opencode-ai`, and OpenCode installs its own
+  `@opencode-ai/plugin` and fetches its models.dev catalog on start.
 
 The siblings are pinned in `repo.json` under `siblings/`, each nested one at the path its parent's build reads:
 `typescript` with its `core`, `standard` and `conformance`, `forebay-library` with its `library`, `core`, `standard`

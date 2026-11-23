@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { bundled, homeWith, HOST_ID, placesOf, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
-import { bundledHost, entrySource, installedOpencode, isolatedEnvironment, opencodeVersion, pinnedKoffi, ranOpencode, realOpencodeFiles, type Ran } from "./fixtures/opencode.js";
+import { bundledHost, entrySource, installedOpencode, isolatedEnvironment, opencodeVersion, pinnedKoffi, ranOpencode, realOpencodeFiles, withVariables, type Ran } from "./fixtures/opencode.js";
 
 const MODEL = "claude-sonnet-4-5";
 const PROVIDER_ID = "forebay";
@@ -53,7 +53,7 @@ function providerInstall(id: string): Install {
 
 /** Variables naming a credential OpenCode would read on its own, which the run must not have. */
 function withoutCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !/_API_KEY$|_AUTH_TOKEN$/.test(name)));
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !/_API_KEY$|_AUTH_TOKEN$/i.test(name)));
 }
 
 /** A runtime home with the proxy and one test provider installed, and OpenCode's folders isolated under it. */
@@ -66,8 +66,8 @@ function scratch(): Scratch {
   for (const directory of [project, join(configDirectory, "plugins"), isolated.TEMP!, isolated.APPDATA!, isolated.LOCALAPPDATA!]) mkdirSync(directory, { recursive: true });
   const listens = join(opencode, "listens.log");
   const koffi = join(opencode, "koffi.json");
-  writeFileSync(join(configDirectory, "plugins", "weivel-host.ts"), entrySource({ bundle: hostBundle, runtime: home.runtime, hostId: HOST_ID, holders: join(home.base, "state", "processes", `${HOST_ID}.json`), plugin: "opencode-proxy", service: SERVICE, listens, koffi }));
-  const env = { ...withoutCredentials(process.env), ...placesOf(home.base), ...isolated };
+  writeFileSync(join(configDirectory, "plugins", "weivel-host.ts"), entrySource({ bundle: hostBundle, runtime: home.runtime, hostId: HOST_ID, plugin: "opencode-proxy", service: SERVICE, listens, koffi }));
+  const env = withVariables(withoutCredentials(process.env), { ...placesOf(home.base), ...isolated });
   const created = { home, opencode, project, listens, koffi, env };
   scratches.push(created);
   return created;
@@ -85,6 +85,28 @@ function filesNamed(directory: string, name: string): string[] {
 function changedFiles(before: Map<string, string>, after: Map<string, string>): string[] {
   const names = new Set([...before.keys(), ...after.keys()]);
   return [...names].filter((name) => before.get(name) !== after.get(name));
+}
+
+/**
+ * The scratch holds no credential and no OpenCode config file, nothing changed under the real home's OpenCode, Bun
+ * and npm folders, no JavaScript listen was made after the entry loaded, and the bundle loaded the pinned koffi.
+ */
+function expectIsolated(within: Scratch): void {
+  expect(filesNamed(within.opencode, "auth.json")).toEqual([]);
+  for (const name of ["opencode.json", "opencode.jsonc", "config.json"]) expect(filesNamed(within.opencode, name)).toEqual([]);
+  expect(changedFiles(realBefore, realOpencodeFiles(REAL_HOME))).toEqual([]);
+  expect(existsSync(within.listens) ? readFileSync(within.listens, "utf8") : "").toBe("");
+  expect(JSON.parse(readFileSync(within.koffi, "utf8"))).toEqual({ path: join(root, "weivel", "node_modules", "koffi"), version: pinnedKoffi() });
+}
+
+function expectServed(run: Ran): void {
+  expect(run.code, run.stderr).toBe(0);
+  expect(run.stdout).toContain("served by alpha");
+}
+
+function expectListed(listed: Ran): void {
+  expect(listed.code, listed.stderr).toBe(0);
+  expect(listed.stdout.split(/\r?\n/)).toContain(`${PROVIDER_ID}/${MODEL}`);
 }
 
 beforeAll(async () => {
@@ -111,30 +133,20 @@ describe(`opencode-proxy inside OpenCode ${opencodeVersion().version}, whose own
     const first = await opencode(within, ["run", "-m", `${PROVIDER_ID}/${MODEL}`, "say hi"]);
     const second = await opencode(within, ["run", "-m", `${PROVIDER_ID}/${MODEL}`, "say hi"]);
 
-    expect(filesNamed(within.opencode, "auth.json")).toEqual([]);
-    for (const name of ["opencode.json", "opencode.jsonc", "config.json"]) expect(filesNamed(within.opencode, name)).toEqual([]);
-    expect(changedFiles(realBefore, realOpencodeFiles(REAL_HOME))).toEqual([]);
-    expect(existsSync(within.listens) ? readFileSync(within.listens, "utf8") : "").toBe("");
-    expect(JSON.parse(readFileSync(within.koffi, "utf8"))).toEqual({ path: join(root, "weivel", "node_modules", "koffi"), version: pinnedKoffi() });
-    expect(listed.code, listed.stderr).toBe(0);
-    expect(listed.stdout.split(/\r?\n/)).toContain(`${PROVIDER_ID}/${MODEL}`);
-    for (const run of [first, second]) {
-      expect(run.code, run.stderr).toBe(0);
-      expect(run.stdout).toContain("served by alpha");
-    }
+    expectIsolated(within);
+    expectListed(listed);
+    expectServed(first);
+    expectServed(second);
   }, RUN_BOUND);
 
-  it("lists the models in two OpenCode processes started together in one home OpenCode already set up", async () => {
+  it("serves two OpenCode processes started together in one home OpenCode already set up", async () => {
     const within = scratch();
 
     const warmed = await opencode(within, ["models", PROVIDER_ID]);
-    const both = await Promise.all([opencode(within, ["models", PROVIDER_ID]), opencode(within, ["models", PROVIDER_ID])]);
+    const both = await Promise.all([opencode(within, ["run", "-m", `${PROVIDER_ID}/${MODEL}`, "say hi"]), opencode(within, ["run", "-m", `${PROVIDER_ID}/${MODEL}`, "say hi"])]);
 
-    expect(warmed.code, warmed.stderr).toBe(0);
-    for (const listed of both) {
-      expect(listed.code, listed.stderr).toBe(0);
-      expect(listed.stdout.split(/\r?\n/)).toContain(`${PROVIDER_ID}/${MODEL}`);
-    }
-    expect(changedFiles(realBefore, realOpencodeFiles(REAL_HOME))).toEqual([]);
+    expectIsolated(within);
+    expectListed(warmed);
+    both.forEach(expectServed);
   }, RUN_BOUND);
 });

@@ -1,4 +1,5 @@
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import { gzipSync } from "node:zlib";
 
 export interface Received {
   readonly method: string;
@@ -13,16 +14,26 @@ export interface Upstream {
   close(): Promise<void>;
 }
 
-/** A local upstream that records each request and answers 200 with `x-upstream: fake` and a JSON body naming the path. */
-export function fakeUpstream(): Promise<Upstream> {
+/**
+ * A local upstream that records each request and answers 200 with `x-upstream: fake` and a JSON body naming the path,
+ * gzip-compressed with its content-encoding and content-length when `gzip` is set.
+ */
+export function fakeUpstream(gzip = false): Promise<Upstream> {
   const received: Received[] = [];
   const server: Server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
       received.push({ method: request.method ?? "", url: request.url ?? "", headers: request.headers, body: Buffer.concat(chunks).toString("utf8") });
-      response.writeHead(200, { "content-type": "application/json", "x-upstream": "fake" });
-      response.end(JSON.stringify({ upstream: request.url }));
+      const body = Buffer.from(JSON.stringify({ upstream: request.url }));
+      if (!gzip) {
+        response.writeHead(200, { "content-type": "application/json", "x-upstream": "fake" });
+        response.end(body);
+        return;
+      }
+      const compressed = gzipSync(body);
+      response.writeHead(200, { "content-type": "application/json", "x-upstream": "fake", "content-encoding": "gzip", "content-length": String(compressed.length) });
+      response.end(compressed);
     });
   });
   return new Promise((resolve) => {

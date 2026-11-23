@@ -1,14 +1,10 @@
 import type { Config, RoutingProfile } from "./services.js";
 
-/**
- * What the `config` hook names the provider it adds to OpenCode, the base its model requests are addressed to, and the
- * placeholder token the model client sends as `Authorization: Bearer`, which `placeholderAuthorization` names whole.
- */
+/** What the `config` hook names the provider it adds to OpenCode, and the base its model requests are addressed to. */
 export interface OpencodeSettings {
   readonly providerId: unknown;
   readonly providerName: unknown;
   readonly baseURL: unknown;
-  readonly authToken: unknown;
 }
 
 export interface ProxySettings {
@@ -66,7 +62,6 @@ export async function readSettings(config: Config): Promise<ProxySettings> {
       providerId: member(opencode, "providerId"),
       providerName: member(opencode, "providerName"),
       baseURL: member(opencode, "baseURL"),
-      authToken: member(opencode, "authToken"),
     },
   };
 }

@@ -24,6 +24,17 @@ export function pinnedKoffi(): string {
 }
 
 /**
+ * `base` with each of `overrides` set, any variable of the same name in another case removed first.
+ * @implNote Windows names variables case-insensitively, and a forked worker inherits them upper-cased, so a lower-case
+ * `npm_config_cache` beside an inherited `NPM_CONFIG_CACHE` would lose to it.
+ */
+export function withVariables(base: NodeJS.ProcessEnv, overrides: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
+  const replaced = new Set(Object.keys(overrides).map((name) => name.toLowerCase()));
+  const kept = Object.entries(base).filter(([name]) => !replaced.has(name.toLowerCase()));
+  return { ...Object.fromEntries(kept), ...overrides };
+}
+
+/**
  * Installs OpenCode into `directory` and answers its binary, the platform package's own, since npm may refuse the
  * wrapper's postinstall that copies it.
  * @implNote npm's cache is moved under `directory`, so the install writes nothing in the real home.
@@ -31,7 +42,7 @@ export function pinnedKoffi(): string {
 export function installedOpencode(directory: string, version: OpencodeVersion): string {
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "package.json"), JSON.stringify({ private: true }));
-  const env = { ...process.env, npm_config_cache: join(directory, "npm-cache"), npm_config_update_notifier: "false" };
+  const env = withVariables(process.env, { npm_config_cache: join(directory, "npm-cache"), npm_config_update_notifier: "false" });
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   execFileSync(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", `${version.package}@${version.version}`], { cwd: directory, env, stdio: "ignore", shell: process.platform === "win32" });
   const platform = PLATFORM_NAMES[process.platform] ?? process.platform;
@@ -59,26 +70,27 @@ export interface Entry {
   readonly bundle: string;
   readonly runtime: string;
   readonly hostId: string;
-  /** The loader's holders record, which names this process its holder before the host starts. */
-  readonly holders: string;
   readonly plugin: string;
   readonly service: string;
-  /** Where each listening socket the process opens is recorded, with its stack. */
+  /**
+   * Where each listen through Node's or Bun's JavaScript API after the entry loaded is recorded, with its stack; a
+   * socket opened from C is not seen.
+   */
   readonly listens: string;
-  /** Where the koffi the bundle resolves is recorded. */
+  /** Where the koffi the bundle resolves is recorded: its folder and the loaded module's own version. */
   readonly koffi: string;
 }
 
 /**
- * The in-process entry an OpenCode loader writes, as the test writes it: it records every listen the process makes
- * and the koffi the bundle resolves, holds the loader as this process, starts the host once per process and answers
- * the hooks of the service it names. It names a service id, never proxy code.
+ * The in-process entry an OpenCode loader writes, as the test writes it: it records each JavaScript listen after it
+ * loads and the koffi the bundle resolves, starts the loader's in-process run once per process and answers the hooks
+ * of the service it names. It names a service id, never proxy code.
  */
 export function entrySource(entry: Entry): string {
   const text = (value: string): string => JSON.stringify(value);
-  return `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+  return `import { appendFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import http from "node:http";
 import net from "node:net";
 import { startHost } from ${text(pathToFileURL(entry.bundle).href)};
@@ -101,13 +113,12 @@ if (globalThis.Bun !== undefined) {
   }
 }
 
-const koffi = dirname(createRequire(${text(entry.bundle)}).resolve("koffi/package.json"));
-writeFileSync(${text(entry.koffi)}, JSON.stringify({ path: koffi, version: JSON.parse(readFileSync(join(koffi, "package.json"), "utf8")).version }));
+const requireBesideTheBundle = createRequire(${text(entry.bundle)});
+writeFileSync(${text(entry.koffi)}, JSON.stringify({ path: dirname(requireBesideTheBundle.resolve("koffi/package.json")), version: requireBesideTheBundle("koffi").version }));
 
 let started;
 export const WeivelHost = async (input) => {
-  if (started === undefined) writeFileSync(${text(entry.holders)}, JSON.stringify({ pid: null, holders: [process.pid] }));
-  started ??= startHost({ hostLibraryPath: ${text(entry.runtime)}, arguments: [${text(entry.hostId)}] });
+  started ??= startHost({ hostLibraryPath: ${text(entry.runtime)}, arguments: [${text(entry.hostId)}, "in-process"] });
   const host = await started;
   const plugin = host.service(${text(entry.plugin)}, ${text(entry.service)});
   if (plugin === undefined) throw new Error(${text(`${entry.plugin} registered no ${entry.service}`)});
@@ -139,13 +150,35 @@ export function ranOpencode(binary: string, parameters: readonly string[], direc
   });
 }
 
-/** The folders OpenCode keeps in a home, as the real home holds them. */
-const REAL_OPENCODE_FOLDERS = [".opencode", ".config/opencode", ".local/share/opencode", ".cache/opencode", ".local/state/opencode", "AppData/Roaming/opencode", "AppData/Local/opencode"];
+/** The folders OpenCode, its Bun and npm keep in a home, wherever each system puts them. */
+const REAL_OPENCODE_FOLDERS = [
+  ".opencode",
+  ".config/opencode",
+  ".local/share/opencode",
+  ".cache/opencode",
+  ".local/state/opencode",
+  "AppData/Roaming/opencode",
+  "AppData/Local/opencode",
+  ".bun",
+  ".cache/bun",
+  "Library/Caches/bun",
+  "AppData/Local/bun",
+  ".npm",
+  "AppData/Local/npm-cache",
+];
 
-/** Every file under the OpenCode folders of `home` with its size and modification time. */
+/**
+ * The npm debug-log folders, which the npm or npx that launches the suite writes and rotates while it runs; a leaking
+ * install still shows in the cache's own entries.
+ */
+const LAUNCHER_LOGS = [".npm/_logs", "AppData/Local/npm-cache/_logs"];
+
+/** Every file under the OpenCode, Bun and npm folders of `home` with its size and modification time. */
 export function realOpencodeFiles(home: string): Map<string, string> {
   const files = new Map<string, string>();
+  const skipped = new Set(LAUNCHER_LOGS.map((folder) => join(home, folder)));
   const walked = (path: string): void => {
+    if (skipped.has(path)) return;
     let entries: string[];
     try {
       entries = readdirSync(path);

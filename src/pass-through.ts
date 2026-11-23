@@ -54,7 +54,11 @@ async function relayed(body: ReadableStream<Uint8Array>, outlet: Outlet): Promis
   }
 }
 
-/** Sends the request upstream undecoded, to the target and with the headers C answers, and its answer back as it came. */
+/**
+ * Sends the request upstream undecoded, to the target and with the headers C answers, and its answer back as it came.
+ * @implNote The answer is reported rewritten: `fetch` decodes a compressed body itself and keeps the upstream's
+ * content-encoding and content-length, which no longer describe the bytes relayed.
+ */
 export async function passThrough(through: PassThrough, request: Undecoded, outlet: Outlet): Promise<void> {
   const argument = { upstream: through.upstream, url: request.url, headers: pairsOf(request.headers), body_length: request.body.length, placeholder_authorization: through.placeholderAuthorization };
   const routed = await through.routing.pass_through({ argument });
@@ -65,7 +69,7 @@ export async function passThrough(through: PassThrough, request: Undecoded, outl
     return;
   }
   const { answer } = answered;
-  const replied = await through.routing.reply_headers({ argument: { headers: pairsOf(answer.headers), rewritten: 0 } });
+  const replied = await through.routing.reply_headers({ argument: { headers: pairsOf(answer.headers), rewritten: 1 } });
   if (answer.body === null) {
     outlet.whole(answer.status, replied.headers, null);
     return;

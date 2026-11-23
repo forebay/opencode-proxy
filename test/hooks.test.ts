@@ -90,14 +90,14 @@ async function configured(run: Running): Promise<{ provider: ProviderConfig; cre
   return { provider: config.provider!.forebay!, credentialsStored };
 }
 
-/** The placeholder the manifest names, which the model client sends and the pass-through drops. */
+/** The placeholder the manifest names, which the model client sends as its key. */
 function placeholderAuthorization(): string {
   return JSON.parse(readFileSync(join(REPOSITORY, "plugin.json"), "utf8")).config.defaults.proxy.placeholderAuthorization;
 }
 
-/** A messages request as OpenCode's model client sends it: the placeholder token as a bearer authorization. */
+/** A messages request as OpenCode's model client sends it: the placeholder as its `x-api-key`. */
 function messages(provider: ProviderConfig, body: string, signal?: AbortSignal): Promise<Response> {
-  const headers = { "content-type": "application/json", authorization: `Bearer ${provider.options.authToken}` };
+  const headers = { "content-type": "application/json", "x-api-key": String(provider.options.apiKey) };
   return provider.options.fetch(`${provider.options.baseURL}/messages`, { method: "POST", headers, body, signal });
 }
 
@@ -132,8 +132,8 @@ describe("opencode-proxy's hooks under the host program, over runtime in a tempo
 
     expect(provider.npm).toBe("@ai-sdk/anthropic");
     expect(provider.models).toEqual({ [MODEL]: { name: MODEL, limit: { context: 200000, output: 64000 } } });
-    expect(Object.keys(provider.options).sort()).toEqual(["authToken", "baseURL", "fetch"]);
-    expect(`Bearer ${provider.options.authToken}`).toBe(placeholderAuthorization());
+    expect(Object.keys(provider.options).sort()).toEqual(["apiKey", "baseURL", "fetch"]);
+    expect(provider.options.apiKey).toBe(placeholderAuthorization());
     expect(credentialsStored).toBe(0);
   }, RUN_BOUND);
 
@@ -222,7 +222,7 @@ describe("opencode-proxy's hooks under the host program, over runtime in a tempo
     expect(await notAnObject.json()).toMatchObject({ type: "error", error: { type: "invalid_request_error" } });
   }, RUN_BOUND);
 
-  it("with no provider installed, sends a messages request upstream as C's step answers, without the placeholder", async () => {
+  it("with no provider installed, sends a messages request upstream as C's step answers", async () => {
     const run = await started([proxyInstall()]);
     const { provider } = await configured(run);
 
@@ -232,7 +232,24 @@ describe("opencode-proxy's hooks under the host program, over runtime in a tempo
     expect(answer.headers.get("x-upstream")).toBe("fake");
     expect(upstream.received).toHaveLength(1);
     expect(upstream.received[0]).toMatchObject({ method: "POST", url: "/v1/messages", body: MESSAGES });
-    expect(upstream.received[0]?.headers.authorization).toBeUndefined();
     expect(provider.models).toEqual({});
+  }, RUN_BOUND);
+
+  it("answers a compressed upstream reply plain, with neither its content-encoding nor its content-length", async () => {
+    const compressing = await fakeUpstream(true);
+    try {
+      const run = await started([proxyInstall({ upstream: compressing.url })]);
+      const { provider } = await configured(run);
+
+      const answer = await messages(provider, MESSAGES);
+
+      expect(answer.status).toBe(200);
+      expect(answer.headers.get("x-upstream")).toBe("fake");
+      expect(answer.headers.get("content-encoding")).toBeNull();
+      expect(answer.headers.get("content-length")).toBeNull();
+      expect(await answer.text()).toBe(JSON.stringify({ upstream: "/v1/messages" }));
+    } finally {
+      await compressing.close();
+    }
   }, RUN_BOUND);
 });

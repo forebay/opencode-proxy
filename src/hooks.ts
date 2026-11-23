@@ -35,18 +35,18 @@ function modelsOf(entries: readonly CatalogModel[]): Record<string, OpencodeMode
 
 /**
  * The hooks OpenCode's plugin API takes: `config` adds the provider whose models are the catalog's entries and whose
- * every model request goes through this process's `fetch`. The only token it hands OpenCode's model client is the
- * configured placeholder, which the model client requires and the pass-through drops; no credential is stored and no
- * file is written.
+ * every model request goes through this process's `fetch`. The only key it hands OpenCode's model client is the
+ * configured placeholder, which the model client requires; no credential is stored and no file is written.
  */
 export function hooksOf(proxy: Proxy): Hooks {
   const fetch = proxyFetch(proxy);
   return {
     async config(config) {
       const { entries } = await proxy.catalog.current();
-      const { providerId, providerName, baseURL, authToken } = proxy.settings.opencode;
+      const { providerId, providerName, baseURL } = proxy.settings.opencode;
+      const apiKey = proxy.settings.placeholderAuthorization;
       config.provider ??= {};
-      config.provider[String(providerId)] = { name: providerName, npm: ANTHROPIC_SDK, options: { baseURL, authToken, fetch }, models: modelsOf(entries) };
+      config.provider[String(providerId)] = { name: providerName, npm: ANTHROPIC_SDK, options: { baseURL, apiKey, fetch }, models: modelsOf(entries) };
     },
   };
 }
