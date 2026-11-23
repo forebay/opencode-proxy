@@ -1,15 +1,93 @@
 {
   "format": 1,
   "importName": "opencode-proxy",
-  "description": "The front door for OpenCode, not yet moved onto the shared host.",
+  "description": "The OpenCode proxy: a weivel plugin that runs inside OpenCode's own process and asks forebay-library's C for every decision.",
   "topics": [
     "ai",
     "ai-proxy",
+    "anthropic",
     "app-proxy",
     "forebay",
     "llm",
     "opencode",
     "proxy",
     "typescript"
+  ],
+  "dependencies": [
+    {
+      "id": "github:1427561829",
+      "importName": "typescript",
+      "commit": "3574327a1fb9d864586d89360f33b6fa3fa5b511"
+    },
+    {
+      "id": "github:1455223370",
+      "importName": "core",
+      "commit": "61bd395091915ee6727ecce2fff58915d4593806",
+      "path": "siblings/typescript/siblings/core"
+    },
+    {
+      "id": "github:1456093642",
+      "importName": "standard",
+      "commit": "9751832b24b8e9f00178f5fca434771e584d7b5d",
+      "path": "siblings/typescript/siblings/standard"
+    },
+    {
+      "id": "github:1426141679",
+      "importName": "conformance",
+      "commit": "bc05534a8e8df412412a1d16dda55e1070875219",
+      "path": "siblings/typescript/siblings/conformance"
+    },
+    {
+      "id": "github:1434954468",
+      "importName": "forebay-library",
+      "commit": "59fb6cf28bc9feaab3fd8f5f676f31bf7578fe65"
+    },
+    {
+      "id": "github:1434914426",
+      "importName": "library",
+      "commit": "24ae1687d1dc8d1654259ba6a1d8db9b2f23f092",
+      "path": "siblings/forebay-library/siblings/library"
+    },
+    {
+      "id": "github:1455223370",
+      "importName": "core",
+      "commit": "fba572ac6fc61ab719dd331a5409796c06ef23b4",
+      "path": "siblings/forebay-library/siblings/core"
+    },
+    {
+      "id": "github:1456093642",
+      "importName": "standard",
+      "commit": "9751832b24b8e9f00178f5fca434771e584d7b5d",
+      "path": "siblings/forebay-library/siblings/standard"
+    },
+    {
+      "id": "github:1457141747",
+      "importName": "c",
+      "commit": "0d0ef67e66de32b40ef9c7851dcd8652e93af808",
+      "path": "siblings/forebay-library/siblings/c"
+    },
+    {
+      "id": "github:1434914426",
+      "importName": "library",
+      "commit": "24ae1687d1dc8d1654259ba6a1d8db9b2f23f092"
+    },
+    {
+      "id": "github:1455223370",
+      "importName": "core",
+      "commit": "fba572ac6fc61ab719dd331a5409796c06ef23b4",
+      "path": "siblings/library/siblings/core"
+    },
+    {
+      "id": "github:1456093642",
+      "importName": "standard",
+      "commit": "9751832b24b8e9f00178f5fca434771e584d7b5d",
+      "path": "siblings/library/siblings/standard"
+    },
+    {
+      "id": "github:1457141747",
+      "importName": "c",
+      "commit": "0d0ef67e66de32b40ef9c7851dcd8652e93af808",
+      "path": "siblings/library/siblings/c"
+    }
   ]
 }

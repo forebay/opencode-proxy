@@ -1,18 +1,63 @@
 {
-  "$schema": "./node_modules/@intisy/bayonet/schema/plugin.schema.json",
-  "id": "opencode-proxy",
   "api": 1,
-  "entry": "dist/front-door-plugin.js",
+  "importName": "opencode-proxy",
+  "id": "opencode-proxy",
+  "version": "3.0.0",
+  "entry": "dist/plugin.js",
+  "bundle": {
+    "entry": "src/plugin.ts"
+  },
   "displayName": "OpenCode proxy",
-  "capabilities": [
-    "front-door"
+  "capabilities": {
+    "provides": [],
+    "consumes": [
+      "forebay.provider"
+    ]
+  },
+  "services": {
+    "provides": [
+      "opencode-proxy:opencode-plugin"
+    ],
+    "consumes": [
+      "routing",
+      "anthropic",
+      "weivel.config",
+      "weivel.log"
+    ]
+  },
+  "config": {
+    "defaults": {
+      "upstream": "https://api.anthropic.com",
+      "proxy": {
+        "placeholderAuthorization": "Bearer sk-ant-loader-proxy"
+      },
+      "opencode": {
+        "providerId": "forebay",
+        "providerName": "forebay",
+        "baseURL": "https://opencode-proxy.invalid/v1",
+        "authToken": "sk-ant-loader-proxy"
+      },
+      "routing": {
+        "tierSourceProvider": "opencode",
+        "tierOrder": [],
+        "tierFallback": [],
+        "tierRegex": "$(.)",
+        "defaultContext": 200000,
+        "defaultOutput": 64000,
+        "loginCommand": "forebay-host action opencode"
+      }
+    }
+  },
+  "access": [
+    {
+      "kind": "network",
+      "target": "setting:upstream",
+      "mode": "connect",
+      "why": "a request no provider serves passes through to the upstream"
+    }
   ],
   "publish": {
-    "scopedOnly": true,
-    "jarModule": [
-      "opencode-proxy-plugin"
-    ],
-    "jarPretest": true
+    "scopedOnly": true
   },
   "repo": {
     "role": "OpenCode proxy layer",

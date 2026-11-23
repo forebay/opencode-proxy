@@ -1,5 +1,5 @@
 kind: generic
-description: The OpenCode proxy layer (opencodeProfile) on top of the generic basekit proxy engine
+description: The OpenCode proxy, a weivel plugin that runs inside OpenCode and asks forebay-library's C for every decision
 badges:
   - npm-version
   - npm-downloads

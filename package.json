@@ -1,9 +1,9 @@
 {
   "name": "opencode-proxy",
-  "version": "2.2.0",
-  "description": "The OpenCode proxy layer (opencodeProfile) on top of the generic basekit proxy engine",
+  "version": "3.0.0",
+  "description": "The OpenCode proxy, a weivel plugin that runs inside OpenCode's process and asks forebay-library's C for every decision.",
+  "main": "dist/plugin.js",
   "type": "module",
-  "main": "dist/index.js",
   "license": "MIT",
   "author": "intisy",
   "repository": {
@@ -12,9 +12,9 @@
   },
   "keywords": [
     "proxy",
-    "routing",
     "anthropic",
     "opencode",
+    "weivel",
     "intisy",
     "opencode-proxy"
   ],
@@ -25,24 +25,17 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.18.0"
   },
   "scripts": {
-    "build": "npx tsc && npx esbuild src/frontdoor.ts --bundle --platform=node --format=esm --outfile=dist/frontdoor.mjs && npx esbuild src/front-door-plugin.ts --bundle --platform=node --format=esm --external:@intisy-ai/basekit/proxy --external:@intisy-ai/basekit/ir --external:@intisy-ai/anthropic-translator --outfile=dist/front-door-plugin.js && node scripts/postbuild-deploy.mjs",
-    "test": "vitest run",
-    "prepublishOnly": "npm run build",
-    "docs": "typedoc"
-  },
-  "dependencies": {
-    "@intisy-ai/anthropic-translator": "^1.1.0",
-    "@intisy-ai/basekit": "^5.0.0"
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node scripts/native.ts && npm run build && tsc --noEmit && vitest run",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "@intisy/bayonet": "^1.8.0",
-    "@types/node": "^22.0.0",
-    "esbuild": "^0.21.5",
-    "typedoc": "^0.28.20",
-    "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "@types/node": "22.10.2",
+    "@weivel/typescript": "file:./siblings/typescript",
+    "typescript": "5.7.2",
+    "vitest": "3.2.7"
   }
 }
