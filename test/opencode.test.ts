@@ -77,6 +77,16 @@ function opencode(within: Scratch, parameters: readonly string[]): Promise<Ran> 
   return ranOpencode(binary, parameters, within.project, within.env, OPENCODE_BOUND);
 }
 
+/**
+ * OpenCode run in `within` with its own session store, every other variable and the runtime home shared.
+ * @implNote OpenCode keeps its sessions in one sqlite database under `XDG_DATA_HOME`, which two runs writing at once
+ * can find locked; that store is OpenCode's own and not under test.
+ */
+function opencodeWithSessionStore(within: Scratch, store: string, parameters: readonly string[]): Promise<Ran> {
+  const env = withVariables(within.env, { XDG_DATA_HOME: join(within.opencode, "xdg", store) });
+  return ranOpencode(binary, parameters, within.project, env, OPENCODE_BOUND);
+}
+
 /** Every file under `directory` whose name is `name`. */
 function filesNamed(directory: string, name: string): string[] {
   return readdirSync(directory, { recursive: true, encoding: "utf8" }).filter((file) => file.split(/[\\/]/).at(-1) === name);
@@ -145,7 +155,8 @@ describe(`opencode-proxy inside OpenCode ${opencodeVersion().version}, whose own
     const within = scratch();
 
     const warmed = await opencode(within, ["models", PROVIDER_ID]);
-    const both = await Promise.all([opencode(within, ["run", "-m", `${PROVIDER_ID}/${MODEL}`, "say hi"]), opencode(within, ["run", "-m", `${PROVIDER_ID}/${MODEL}`, "say hi"])]);
+    const asked = ["run", "-m", `${PROVIDER_ID}/${MODEL}`, "say hi"];
+    const both = await Promise.all([opencodeWithSessionStore(within, "data-first", asked), opencodeWithSessionStore(within, "data-second", asked)]);
 
     expectIsolated(within);
     expectListed(warmed);
