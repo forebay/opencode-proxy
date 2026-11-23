@@ -47,8 +47,8 @@ config file is edited and `auth.json` is never written.
 
 `plugin.json`'s `config.defaults` hold `upstream`, the placeholder authorization OpenCode's model client is given as
 its key, OpenCode's provider id, name and base URL, and the routing profile under `routing`: no tier pattern, so every
-provider's models are listed directly, the default limits and the login command the no-model reply names. A stored model map goes under `routing.modelMap`, each slot a list of
-`{provider, model}`.
+provider's models are listed directly, the default limits and the login command the no-model reply names. A stored
+model map goes under `routing.modelMap`, each slot a list of `{provider, model}`.
 
 ## Testing
 

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { bundled, homeWith, HOST_ID, placesOf, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
+import { bundled, homeWith, HOST_ID, placesOf, processRecords, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
 import { bundledHost, entrySource, installedOpencode, isolatedEnvironment, opencodeVersion, pinnedKoffi, ranOpencode, realOpencodeFiles, withVariables, type Ran } from "./fixtures/opencode.js";
 
 const MODEL = "claude-sonnet-4-5";
@@ -88,10 +88,12 @@ function changedFiles(before: Map<string, string>, after: Map<string, string>): 
 }
 
 /**
- * The scratch holds no credential and no OpenCode config file, nothing changed under the real home's OpenCode, Bun
- * and npm folders, no JavaScript listen was made after the entry loaded, and the bundle loaded the pinned koffi.
+ * The scratch holds no credential, no OpenCode config file and no processes record, nothing changed under the real
+ * home's OpenCode, Bun and npm folders, no JavaScript listen was made after the entry loaded, and the bundle loaded the
+ * pinned koffi.
  */
 function expectIsolated(within: Scratch): void {
+  expect(processRecords(within.home)).toEqual([]);
   expect(filesNamed(within.opencode, "auth.json")).toEqual([]);
   for (const name of ["opencode.json", "opencode.jsonc", "config.json"]) expect(filesNamed(within.opencode, name)).toEqual([]);
   expect(changedFiles(realBefore, realOpencodeFiles(REAL_HOME))).toEqual([]);

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHost, type RunningHost } from "@weivel/typescript/program";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { bundled, homeWith, HOST_ID, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
+import { bundled, homeWith, HOST_ID, processRecords, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
 import { fakeUpstream, type Upstream } from "./fixtures/upstream.js";
 
 const MODEL = "claude-sonnet-4-5";
@@ -72,7 +72,7 @@ function providerInstall(id: string, mode: string, settings: Record<string, unkn
 async function started(installs: readonly Install[]): Promise<Running> {
   const home = homeWith(installs);
   const quiet = (): void => undefined;
-  const host = await startHost({ hostLibraryPath: home.runtime, arguments: [HOST_ID], log: { debug: quiet, info: quiet, warn: quiet, error: quiet } });
+  const host = await startHost({ hostLibraryPath: home.runtime, arguments: [HOST_ID, "in-process"], log: { debug: quiet, info: quiet, warn: quiet, error: quiet } });
   const run = { home, host };
   running.push(run);
   return run;
@@ -114,14 +114,17 @@ beforeEach(async () => {
 afterAll(() => rmSync(bundles, { recursive: true, force: true }));
 
 afterEach(async () => {
+  const records: string[] = [];
   for (const run of running.splice(0)) {
     try {
       await run.host.stop();
+      records.push(...processRecords(run.home));
     } finally {
       run.home.remove();
     }
   }
   await upstream.close();
+  expect(records).toEqual([]);
 });
 
 describe("opencode-proxy's hooks under the host program, over runtime in a temporary home", () => {
@@ -222,7 +225,7 @@ describe("opencode-proxy's hooks under the host program, over runtime in a tempo
     expect(await notAnObject.json()).toMatchObject({ type: "error", error: { type: "invalid_request_error" } });
   }, RUN_BOUND);
 
-  it("with no provider installed, sends a messages request upstream as C's step answers", async () => {
+  it("with no provider installed, sends a messages request upstream as C's step answers, without the placeholder", async () => {
     const run = await started([proxyInstall()]);
     const { provider } = await configured(run);
 
@@ -232,6 +235,8 @@ describe("opencode-proxy's hooks under the host program, over runtime in a tempo
     expect(answer.headers.get("x-upstream")).toBe("fake");
     expect(upstream.received).toHaveLength(1);
     expect(upstream.received[0]).toMatchObject({ method: "POST", url: "/v1/messages", body: MESSAGES });
+    expect(upstream.received[0]?.headers["x-api-key"]).not.toBe(placeholderAuthorization());
+    expect(upstream.received[0]?.headers.authorization).not.toBe(placeholderAuthorization());
     expect(provider.models).toEqual({});
   }, RUN_BOUND);
 

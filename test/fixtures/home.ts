@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { bundlePlugin } from "@weivel/typescript/bundle";
@@ -62,17 +62,34 @@ export function placesOf(base: string): Record<(typeof PLACES)[number], string> 
 
 /**
  * Lays out a fresh home under the temporary directory, as an install leaves one: the registered loader `test-host`,
- * the javascript-host's hint naming runtime and forebay-library, every install enabled, and this process recorded as
- * the loader's holder, so a SERVE run keeps running. The process's places point into it until `remove`.
+ * the javascript-host's hint naming runtime and forebay-library, and every install enabled. No processes record is
+ * written: a run started `in-process` neither claims nor checks one. The process's places point into it until
+ * `remove`, and a layout that throws partway puts them back and deletes the home.
  */
 export function homeWith(installs: readonly Install[]): Home {
   const base = mkdtempSync(join(tmpdir(), "ocp-home-"));
+  const saved = PLACES.map((name) => [name, process.env[name]] as const);
+  const restored = (): void => {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(base, { recursive: true, force: true });
+  };
+  try {
+    return laidOut(base, installs, restored);
+  } catch (error) {
+    restored();
+    throw error;
+  }
+}
+
+function laidOut(base: string, installs: readonly Install[], restored: () => void): Home {
   const runtime = placedLibrary(base, "runtime");
   const forebay = placedLibrary(base, "forebay_library");
   for (const directory of ["user", "portable", "secrets", "koffi"]) mkdirSync(join(base, directory), { recursive: true });
   write(join(base, "catalog", "index.json"), { format: 1, items: {} });
   write(join(base, "state", "hosts", `${HOST_ID}.json`), { id: HOST_ID, kind: "host", version: "1.0.0", home: join(base, "application") });
-  write(join(base, "state", "processes", `${HOST_ID}.json`), { pid: null, holders: [process.pid] });
   write(join(base, "cache", "hosts", "javascript-host.json"), {
     host: "2.0.0",
     libraries: {
@@ -84,19 +101,14 @@ export function homeWith(installs: readonly Install[]): Home {
   installs.forEach((install) => installed(base, install));
   const enabled = Object.fromEntries(installs.map((install) => [install.manifest.id, { enabled: true }]));
   write(join(base, "application", "config", "settings.json"), { plugins: enabled, catalog: { sources: [{ kind: "local", path: join(base, "catalog", "index.json") }] } });
-  const saved = PLACES.map((name) => [name, process.env[name]] as const);
   Object.assign(process.env, placesOf(base));
-  return {
-    base,
-    runtime: runtime.binary,
-    remove() {
-      for (const [name, value] of saved) {
-        if (value === undefined) delete process.env[name];
-        else process.env[name] = value;
-      }
-      rmSync(base, { recursive: true, force: true });
-    },
-  };
+  return { base, runtime: runtime.binary, remove: restored };
+}
+
+/** The files of the home's processes folder, where a run that claimed the loader would have written its record. */
+export function processRecords(home: Home): string[] {
+  const folder = join(home.base, "state", "processes");
+  return existsSync(folder) ? readdirSync(folder) : [];
 }
 
 /** Bundles a plugin entry into one module, as a plugin's build does, under `directory`. */
