@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { bundlePlugin } from "@weivel/typescript/bundle";
@@ -61,13 +61,22 @@ export function placesOf(base: string): Record<(typeof PLACES)[number], string> 
 }
 
 /**
+ * A fresh folder under the temporary directory, named by its real path.
+ * @implNote macOS's temporary directory sits under `/var`, a link to `/private/var`, and what the process resolves
+ * there is the real path, so a path the test builds is compared only once it is real too.
+ */
+export function realTemporaryFolder(prefix: string): string {
+  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+}
+
+/**
  * Lays out a fresh home under the temporary directory, as an install leaves one: the registered loader `test-host`,
  * the javascript-host's hint naming runtime and forebay-library, and every install enabled. No processes record is
  * written: a run started `in-process` neither claims nor checks one. The process's places point into it until
  * `remove`, and a layout that throws partway puts them back and deletes the home.
  */
 export function homeWith(installs: readonly Install[]): Home {
-  const base = mkdtempSync(join(tmpdir(), "ocp-home-"));
+  const base = realTemporaryFolder("ocp-home-");
   const saved = PLACES.map((name) => [name, process.env[name]] as const);
   const restored = (): void => {
     for (const [name, value] of saved) {

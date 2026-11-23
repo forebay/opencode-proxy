@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { bundled, homeWith, HOST_ID, placesOf, processRecords, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
+import { bundled, homeWith, HOST_ID, placesOf, processRecords, realTemporaryFolder, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
 import { bundledHost, entrySource, installedOpencode, isolatedEnvironment, opencodeVersion, pinnedKoffi, ranOpencode, realOpencodeFiles, withVariables, type Ran } from "./fixtures/opencode.js";
 
 const MODEL = "claude-sonnet-4-5";
@@ -22,8 +22,8 @@ interface Scratch {
   readonly env: NodeJS.ProcessEnv;
 }
 
-/** The real home, read before any home of the test moves `HOME` and `USERPROFILE`. */
-const REAL_HOME = homedir();
+/** The real home by its real path, read before any home of the test moves `HOME` and `USERPROFILE`. */
+const REAL_HOME = realpathSync(homedir());
 const realBefore = realOpencodeFiles(REAL_HOME);
 let root: string;
 let binary: string;
@@ -112,7 +112,7 @@ function expectListed(listed: Ran): void {
 }
 
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), "ocp-opencode-"));
+  root = realTemporaryFolder("ocp-opencode-");
   binary = installedOpencode(join(root, "opencode"), opencodeVersion());
   hostBundle = await bundledHost(join(root, "weivel"));
   proxyBundle = await bundled(join(REPOSITORY, "src", "plugin.ts"), join(root, "bundles", "proxy"));
