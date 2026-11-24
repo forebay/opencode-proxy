@@ -12,6 +12,7 @@ const SERVICE = "opencode-proxy:opencode-plugin";
 const SETUP_BOUND = 600_000;
 const RUN_BOUND = 300_000;
 const OPENCODE_BOUND = 180_000;
+const TEARDOWN_BOUND = 120_000;
 
 /** One OpenCode home: the runtime home the host runs over, and OpenCode's own folders under it. */
 interface Scratch {
@@ -140,7 +141,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   for (const finished of scratches.splice(0)) finished.home.remove();
-});
+}, TEARDOWN_BOUND);
 
 afterAll(() => root?.remove());
 
