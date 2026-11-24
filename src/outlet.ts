@@ -135,6 +135,9 @@ export class Outlet {
     if (!this.#settled) {
       this.#settled = true;
       this.#reject(abortReason(this.signal));
+    } else if (this.#stream !== undefined && !this.#ended) {
+      this.#ended = true;
+      this.#stream.error(abortReason(this.signal));
     }
     this.#pulled?.();
     this.#pulled = undefined;

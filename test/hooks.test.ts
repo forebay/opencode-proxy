@@ -204,8 +204,11 @@ describe("opencode-proxy's hooks under the host program, over runtime in a tempo
     const caller = new AbortController();
 
     const answer = await messages(provider, STREAMED_MESSAGES, caller.signal);
-    await answer.body!.getReader().read();
+    const reader = answer.body!.getReader();
+    await reader.read();
     caller.abort();
+
+    await expect(reader.read()).rejects.toBeDefined();
 
     const probe = (): { released: number; releasedWhileReading: number } | undefined => run.host.service("alpha", "alpha:probe");
     await expect.poll(() => probe()?.released, { timeout: 5_000 }).toBe(1);
