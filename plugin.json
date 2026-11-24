@@ -42,7 +42,7 @@
         "tierFallback": [],
         "defaultContext": 200000,
         "defaultOutput": 64000,
-        "loginCommand": "forebay-host action opencode"
+        "loginCommand": "spisor-host action opencode-loader"
       }
     }
   },

@@ -29,7 +29,9 @@ config file is edited and `auth.json` is never written.
   and `anthropic.model_listing` or `model_lookup`, a messages body is decoded by `anthropic.decode_request`, and every
   other request is walked as a pass-through. No arrival is asked, since no request crossed a socket.
 - `src/walk.ts`: the loop, `routing.step` until it answers done, performing each step and reporting how it went;
-  exhaustion is answered by `anthropic.rate_limit_reply`, never by the upstream's own 429.
+  exhaustion is answered by `anthropic.rate_limit_reply`, never by the upstream's own 429. Each provider call carries
+  a random token, and the provider's `cancel` is called with it when OpenCode cancels the request before `handle`
+  answered.
 - `src/relay.ts`: a provider's stream through `anthropic.stream_encode`, one encoder per provider, and the error event
   C names when it fails after bytes went out; the stream is freed through the provider's `release_stream` when it
   offers one, OpenCode cancelling the request included.

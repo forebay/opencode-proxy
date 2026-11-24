@@ -233,13 +233,15 @@ export interface ProviderNextAnswer {
 
 /**
  * The `forebay.provider` contract as a provided implementation offers it, in the binding's shapes; `release_stream`
- * is a release, which an implementation may leave out, and which the consumer calls whenever it is offered.
+ * is a release, which an implementation may leave out, and which the consumer calls whenever it is offered. `cancel`
+ * ends the call whose `handle` argument carried the same `token`.
  */
 export interface Provider {
   models(input: Record<string, never>): Promise<{ provider: CatalogProvider }>;
-  handle(input: { argument: { request: unknown; headers: readonly Pair[] } }): Promise<ProviderHandleAnswer>;
+  handle(input: { argument: { request: unknown; headers: readonly Pair[]; token: bigint } }): Promise<ProviderHandleAnswer>;
   next(input: { stream: unknown }): Promise<ProviderNextAnswer>;
   release_stream?(input: { stream: unknown }): unknown;
+  cancel(input: { argument: { token: bigint } }): Promise<unknown>;
 }
 
 export interface Config {

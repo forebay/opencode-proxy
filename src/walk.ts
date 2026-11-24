@@ -59,11 +59,34 @@ async function stepped(exchange: Exchange, walk?: Handle, report?: Report): Prom
   return answer;
 }
 
-async function handled(exchange: Exchange, provider: Provider, model: string): Promise<ProviderHandleAnswer> {
+/** A token no other call to the provider carries, so a consumer can end this call alone. */
+function drawnToken(): bigint {
+  return crypto.getRandomValues(new BigUint64Array(1))[0]!;
+}
+
+/** Ends the provider's call that carried `token`. */
+async function cancelled(provider: Provider, token: bigint): Promise<void> {
   try {
-    return await provider.handle({ argument: { request: { ...exchange.request.ir, model }, headers: exchange.request.headers } });
+    await provider.cancel({ argument: { token } });
+  } catch {
+    // The answer of a call the client left is discarded either way.
+  }
+}
+
+/** The provider's answer to the request, its call cancelled by its token as soon as the client goes. */
+async function handled(exchange: Exchange, provider: Provider, model: string): Promise<ProviderHandleAnswer> {
+  const { signal } = exchange.outlet;
+  const token = drawnToken();
+  const cancel = (): void => void cancelled(provider, token);
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    const pending = provider.handle({ argument: { request: { ...exchange.request.ir, model }, headers: exchange.request.headers, token } });
+    if (signal.aborted) cancel();
+    return await pending;
   } catch (error) {
     return { kind: PROVIDER_HANDLE.THROWN, message: messageOf(error) };
+  } finally {
+    signal.removeEventListener("abort", cancel);
   }
 }
 

@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { startHost, type RunningHost } from "@weivel/typescript/program";
+import { scratchHome, type ScratchHome } from "@weivel/typescript/testing";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { bundled, homeWith, HOST_ID, processRecords, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
 import { fakeUpstream, type Upstream } from "./fixtures/upstream.js";
@@ -30,12 +30,18 @@ interface PluginInput {
   readonly client: { readonly auth: { set(input: unknown): Promise<unknown> } };
 }
 
+/** What the test provider records of the tokens its calls carried. */
+interface TokenProbe {
+  readonly handled: readonly bigint[];
+  readonly cancelled: readonly bigint[];
+}
+
 interface Running {
   readonly home: Home;
   readonly host: RunningHost;
 }
 
-let bundles: string;
+let bundles: ScratchHome | undefined;
 let proxyBundle: string;
 let providerBundle: string;
 let upstream: Upstream;
@@ -90,6 +96,10 @@ async function configured(run: Running): Promise<{ provider: ProviderConfig; cre
   return { provider: config.provider!.forebay!, credentialsStored };
 }
 
+function tokensOf(run: Running, id: string): TokenProbe | undefined {
+  return run.host.service<TokenProbe>(id, `${id}:probe`);
+}
+
 /** The placeholder the manifest names, which the model client sends as its key. */
 function placeholderAuthorization(): string {
   return JSON.parse(readFileSync(join(REPOSITORY, "plugin.json"), "utf8")).config.defaults.proxy.placeholderAuthorization;
@@ -102,16 +112,16 @@ function messages(provider: ProviderConfig, body: string, signal?: AbortSignal):
 }
 
 beforeAll(async () => {
-  bundles = mkdtempSync(join(tmpdir(), "ocp-bundles-"));
-  proxyBundle = await bundled(join(REPOSITORY, "src", "plugin.ts"), join(bundles, "proxy"));
-  providerBundle = await bundled(join(REPOSITORY, "test", "fixtures", "provider", "index.ts"), join(bundles, "provider"));
+  bundles = scratchHome({ prefix: "ocp-bundles-", libraries: {}, environment: () => ({}), files: () => [] });
+  proxyBundle = await bundled(join(REPOSITORY, "src", "plugin.ts"), join(bundles.base, "proxy"));
+  providerBundle = await bundled(join(REPOSITORY, "test", "fixtures", "provider", "index.ts"), join(bundles.base, "provider"));
 }, RUN_BOUND);
 
 beforeEach(async () => {
   upstream = await fakeUpstream();
 });
 
-afterAll(() => rmSync(bundles, { recursive: true, force: true }));
+afterAll(() => bundles?.remove());
 
 afterEach(async () => {
   const records: string[] = [];
@@ -213,6 +223,44 @@ describe("opencode-proxy's hooks under the host program, over runtime in a tempo
     const probe = (): { released: number; releasedWhileReading: number } | undefined => run.host.service("alpha", "alpha:probe");
     await expect.poll(() => probe()?.released, { timeout: 5_000 }).toBe(1);
     expect(probe()?.releasedWhileReading).toBe(0);
+  }, RUN_BOUND);
+
+  it("cancels the provider's call by the token it carried once OpenCode cancels the request before an answer", async () => {
+    const run = await started([proxyInstall(), providerInstall("alpha", "hang-handle")]);
+    const { provider } = await configured(run);
+    const caller = new AbortController();
+
+    const answer = messages(provider, MESSAGES, caller.signal);
+    await expect.poll(() => tokensOf(run, "alpha")?.handled.length, { timeout: 5_000 }).toBe(1);
+    caller.abort();
+
+    await expect(answer).rejects.toBeDefined();
+    await expect.poll(() => tokensOf(run, "alpha")?.cancelled.length, { timeout: 5_000 }).toBe(1);
+    expect(tokensOf(run, "alpha")?.cancelled).toEqual(tokensOf(run, "alpha")?.handled);
+  }, RUN_BOUND);
+
+  it("hands each call to a provider a token of its own", async () => {
+    const run = await started([proxyInstall(), providerInstall("alpha", "plain")]);
+    const { provider } = await configured(run);
+
+    await messages(provider, MESSAGES);
+    await messages(provider, MESSAGES);
+
+    const handled = tokensOf(run, "alpha")?.handled ?? [];
+    expect(handled).toHaveLength(2);
+    expect(handled.every((token) => typeof token === "bigint")).toBe(true);
+    expect(handled[0]).not.toBe(handled[1]);
+  }, RUN_BOUND);
+
+  it("names the loader's login command when no provider offers the model asked for", async () => {
+    const run = await started([proxyInstall(), providerInstall("alpha", "plain")]);
+    const { provider } = await configured(run);
+
+    const answer = await messages(provider, JSON.stringify({ model: "claude-offered-by-none", max_tokens: 16, messages: [{ role: "user", content: "hi" }] }));
+    const body = await answer.text();
+
+    expect(answer.status, body).toBe(503);
+    expect(JSON.parse(body).error.message).toContain("log a provider in with spisor-host action opencode-loader alpha login");
   }, RUN_BOUND);
 
   it("refuses a body over C's limit with 413 and one that is no JSON object with 400", async () => {

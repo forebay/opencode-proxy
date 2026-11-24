@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { scratchHome, type ScratchHome } from "@weivel/typescript/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { bundled, homeWith, HOST_ID, placesOf, processRecords, realTemporaryFolder, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
+import { bundled, homeWith, HOST_ID, processRecords, REPOSITORY, type Home, type Install } from "./fixtures/home.js";
 import { bundledHost, entrySource, installedOpencode, isolatedEnvironment, opencodeVersion, pinnedKoffi, ranOpencode, realOpencodeFiles, withVariables, type Ran } from "./fixtures/opencode.js";
 
 const MODEL = "claude-sonnet-4-5";
@@ -25,7 +26,7 @@ interface Scratch {
 /** The real home by its real path, read before any home of the test moves `HOME` and `USERPROFILE`. */
 const REAL_HOME = realpathSync(homedir());
 const realBefore = realOpencodeFiles(REAL_HOME);
-let root: string;
+let root: ScratchHome | undefined;
 let binary: string;
 let hostBundle: string;
 let proxyBundle: string;
@@ -56,18 +57,26 @@ function withoutCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([name]) => !/_API_KEY$|_AUTH_TOKEN$/i.test(name)));
 }
 
+function opencodeFolder(base: string): string {
+  return join(base, "opencode");
+}
+
+function configDirectoryOf(base: string): string {
+  return join(opencodeFolder(base), "config-dir");
+}
+
 /** A runtime home with the proxy and one test provider installed, and OpenCode's folders isolated under it. */
 function scratch(): Scratch {
-  const home = homeWith([proxyInstall(), providerInstall("alpha")]);
-  const opencode = join(home.base, "opencode");
-  const configDirectory = join(opencode, "config-dir");
+  const home = homeWith([proxyInstall(), providerInstall("alpha")], (base) => isolatedEnvironment(opencodeFolder(base), configDirectoryOf(base)));
+  const opencode = opencodeFolder(home.base);
+  const configDirectory = configDirectoryOf(home.base);
   const project = join(opencode, "project");
-  const isolated = isolatedEnvironment(opencode, configDirectory);
-  for (const directory of [project, join(configDirectory, "plugins"), isolated.TEMP!, isolated.APPDATA!, isolated.LOCALAPPDATA!]) mkdirSync(directory, { recursive: true });
+  const { TEMP, APPDATA, LOCALAPPDATA } = home.environment;
+  for (const directory of [project, join(configDirectory, "plugins"), TEMP!, APPDATA!, LOCALAPPDATA!]) mkdirSync(directory, { recursive: true });
   const listens = join(opencode, "listens.log");
   const koffi = join(opencode, "koffi.json");
   writeFileSync(join(configDirectory, "plugins", "weivel-host.ts"), entrySource({ bundle: hostBundle, runtime: home.runtime, hostId: HOST_ID, plugin: "opencode-proxy", service: SERVICE, listens, koffi }));
-  const env = withVariables(withoutCredentials(process.env), { ...placesOf(home.base), ...isolated });
+  const env = withVariables(withoutCredentials(process.env), home.environment);
   const created = { home, opencode, project, listens, koffi, env };
   scratches.push(created);
   return created;
@@ -108,7 +117,7 @@ function expectIsolated(within: Scratch): void {
   for (const name of ["opencode.json", "opencode.jsonc", "config.json"]) expect(filesNamed(within.opencode, name)).toEqual([]);
   expect(changedFiles(realBefore, realOpencodeFiles(REAL_HOME))).toEqual([]);
   expect(existsSync(within.listens) ? readFileSync(within.listens, "utf8") : "").toBe("");
-  expect(JSON.parse(readFileSync(within.koffi, "utf8"))).toEqual({ path: join(root, "weivel", "node_modules", "koffi"), version: pinnedKoffi() });
+  expect(JSON.parse(readFileSync(within.koffi, "utf8"))).toEqual({ path: join(root!.base, "weivel", "node_modules", "koffi"), version: pinnedKoffi() });
 }
 
 function expectServed(run: Ran): void {
@@ -122,20 +131,18 @@ function expectListed(listed: Ran): void {
 }
 
 beforeAll(async () => {
-  root = realTemporaryFolder("ocp-opencode-");
-  binary = installedOpencode(join(root, "opencode"), opencodeVersion());
-  hostBundle = await bundledHost(join(root, "weivel"));
-  proxyBundle = await bundled(join(REPOSITORY, "src", "plugin.ts"), join(root, "bundles", "proxy"));
-  providerBundle = await bundled(join(REPOSITORY, "test", "fixtures", "provider", "index.ts"), join(root, "bundles", "provider"));
+  root = scratchHome({ prefix: "ocp-opencode-", libraries: {}, environment: () => ({}), files: () => [] });
+  binary = installedOpencode(join(root.base, "opencode"), opencodeVersion());
+  hostBundle = await bundledHost(join(root.base, "weivel"));
+  proxyBundle = await bundled(join(REPOSITORY, "src", "plugin.ts"), join(root.base, "bundles", "proxy"));
+  providerBundle = await bundled(join(REPOSITORY, "test", "fixtures", "provider", "index.ts"), join(root.base, "bundles", "provider"));
 }, SETUP_BOUND);
 
 afterEach(() => {
   for (const finished of scratches.splice(0)) finished.home.remove();
 });
 
-afterAll(() => {
-  if (root !== undefined) rmSync(root, { recursive: true, force: true });
-});
+afterAll(() => root?.remove());
 
 describe(`opencode-proxy inside OpenCode ${opencodeVersion().version}, whose own process hosts it`, () => {
   it("lists the provider's models, answers two runs in one home through it, and leaves no socket, credential or real-home file behind", async () => {

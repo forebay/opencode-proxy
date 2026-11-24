@@ -1,13 +1,13 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { bundlePlugin } from "@weivel/typescript/bundle";
+import { scratchHome, type PlacedLibrary, type ScratchFile } from "@weivel/typescript/testing";
 
 export const REPOSITORY = resolve(import.meta.dirname, "..", "..");
 export const HOST_ID = "test-host";
 
 const NATIVE = join(REPOSITORY, "native");
-const PLACES = ["SPISOR_HOME", "SPISOR_STATE", "SPISOR_CACHE", "SPISOR_SECRETS", "HOME", "USERPROFILE"] as const;
+const FOLDERS = ["user", "portable", "secrets", "koffi"];
 
 /** One plugin to install: its manifest, the bundled entry to place where the manifest names it, and its stored settings. */
 export interface Install {
@@ -16,40 +16,19 @@ export interface Install {
   readonly settings: Record<string, unknown>;
 }
 
+/** Further variables a test sets while the home lives, given its base; one of the same name as a place wins. */
+export type Variables = (base: string) => Readonly<Record<string, string>>;
+
 export interface Home {
   readonly base: string;
   readonly runtime: string;
-  /** Puts the process's places back as they were and deletes the home. */
+  /** Every variable the home set in the process while it lives. */
+  readonly environment: Readonly<Record<string, string>>;
+  /** Puts the process's variables back as they were and deletes the home. */
   remove(): void;
 }
 
-function write(path: string, content: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, typeof content === "string" ? content : JSON.stringify(content));
-}
-
-/** Copies a native library and its declaration out of `native/` into its own directory of the home. */
-function placedLibrary(base: string, target: string): { directory: string; binary: string } {
-  const source = join(NATIVE, target);
-  const directory = join(base, "libraries", target);
-  mkdirSync(directory, { recursive: true });
-  for (const file of readdirSync(source)) copyFileSync(join(source, file), join(directory, file));
-  const binary = readdirSync(source).find((file) => file !== "library.json");
-  if (binary === undefined) throw new Error(`native/${target} holds no binary; run node scripts/native.ts`);
-  return { directory, binary: join(directory, binary) };
-}
-
-function installed(base: string, install: Install): void {
-  const { id, version, entry } = install.manifest;
-  const bundle = join(base, "cache", "bundles", id, version);
-  write(join(bundle, "plugin.json"), install.manifest);
-  mkdirSync(dirname(join(bundle, entry)), { recursive: true });
-  copyFileSync(install.bundle, join(bundle, entry));
-  write(join(bundle, ".installed.json"), { files: {} });
-  write(join(base, "application", "config", `${id}.json`), install.settings);
-}
-
-export function placesOf(base: string): Record<(typeof PLACES)[number], string> {
+function placesOf(base: string): Record<string, string> {
   return {
     SPISOR_HOME: join(base, "portable"),
     SPISOR_STATE: join(base, "state"),
@@ -60,58 +39,53 @@ export function placesOf(base: string): Record<(typeof PLACES)[number], string> 
   };
 }
 
-/**
- * A fresh folder under the temporary directory, named by its real path.
- * @implNote macOS's temporary directory sits under `/var`, a link to `/private/var`, and what the process resolves
- * there is the real path, so a path the test builds is compared only once it is real too.
- */
-export function realTemporaryFolder(prefix: string): string {
-  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+function installedFiles(base: string, install: Install): ScratchFile[] {
+  const { id, version, entry } = install.manifest;
+  const bundle = join(base, "cache", "bundles", id, version);
+  return [
+    { path: join(bundle, "plugin.json"), content: install.manifest },
+    { path: join(bundle, entry), copyFrom: install.bundle },
+    { path: join(bundle, ".installed.json"), content: { files: {} } },
+    { path: join(base, "application", "config", `${id}.json`), content: install.settings },
+  ];
 }
 
-/**
- * Lays out a fresh home under the temporary directory, as an install leaves one: the registered loader `test-host`,
- * the javascript-host's hint naming runtime and forebay-library, and every install enabled. No processes record is
- * written: a run started `in-process` neither claims nor checks one. The process's places point into it until
- * `remove`, and a layout that throws partway puts them back and deletes the home.
- */
-export function homeWith(installs: readonly Install[]): Home {
-  const base = realTemporaryFolder("ocp-home-");
-  const saved = PLACES.map((name) => [name, process.env[name]] as const);
-  const restored = (): void => {
-    for (const [name, value] of saved) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-    rmSync(base, { recursive: true, force: true });
-  };
-  try {
-    return laidOut(base, installs, restored);
-  } catch (error) {
-    restored();
-    throw error;
-  }
-}
-
-function laidOut(base: string, installs: readonly Install[], restored: () => void): Home {
-  const runtime = placedLibrary(base, "runtime");
-  const forebay = placedLibrary(base, "forebay_library");
-  for (const directory of ["user", "portable", "secrets", "koffi"]) mkdirSync(join(base, directory), { recursive: true });
-  write(join(base, "catalog", "index.json"), { format: 1, items: {} });
-  write(join(base, "state", "hosts", `${HOST_ID}.json`), { id: HOST_ID, kind: "host", version: "1.0.0", home: join(base, "application") });
-  write(join(base, "cache", "hosts", "javascript-host.json"), {
+/** The files an install leaves: the registered loader, the javascript-host's hint naming the libraries, every install enabled. */
+function homeFiles(base: string, libraries: Readonly<Record<string, PlacedLibrary>>, installs: readonly Install[]): ScratchFile[] {
+  const catalog = join(base, "catalog", "index.json");
+  const enabled = Object.fromEntries(installs.map((install) => [install.manifest.id, { enabled: true }]));
+  const hint = {
     host: "2.0.0",
     libraries: {
-      runtime: { version: "0.2.0", ...runtime },
+      runtime: { version: "0.2.0", ...libraries.runtime },
       koffi: { version: "2.0.0", directory: join(base, "koffi") },
-      "forebay-library": { version: "0.2.0", ...forebay },
+      "forebay-library": { version: "0.2.0", ...libraries.forebay_library },
     },
+  };
+  return [
+    { path: catalog, content: { format: 1, items: {} } },
+    { path: join(base, "state", "hosts", `${HOST_ID}.json`), content: { id: HOST_ID, kind: "host", version: "1.0.0", home: join(base, "application") } },
+    { path: join(base, "cache", "hosts", "javascript-host.json"), content: hint },
+    ...installs.flatMap((install) => installedFiles(base, install)),
+    { path: join(base, "application", "config", "settings.json"), content: { plugins: enabled, catalog: { sources: [{ kind: "local", path: catalog }] } } },
+  ];
+}
+
+/**
+ * Lays out a fresh home under the temporary directory, as an install leaves one, with runtime and forebay-library out
+ * of `native/` and spisor's places, then `variables`, set until `remove`. No processes record is written: a run
+ * started `in-process` neither claims nor checks one.
+ */
+export function homeWith(installs: readonly Install[], variables: Variables = () => ({})): Home {
+  let environment: Readonly<Record<string, string>> = {};
+  const scratch = scratchHome({
+    prefix: "ocp-home-",
+    libraries: { runtime: join(NATIVE, "runtime"), forebay_library: join(NATIVE, "forebay_library") },
+    environment: (base) => (environment = { ...placesOf(base), ...variables(base) }),
+    files: (base, libraries) => homeFiles(base, libraries, installs),
   });
-  installs.forEach((install) => installed(base, install));
-  const enabled = Object.fromEntries(installs.map((install) => [install.manifest.id, { enabled: true }]));
-  write(join(base, "application", "config", "settings.json"), { plugins: enabled, catalog: { sources: [{ kind: "local", path: join(base, "catalog", "index.json") }] } });
-  Object.assign(process.env, placesOf(base));
-  return { base, runtime: runtime.binary, remove: restored };
+  for (const folder of FOLDERS) mkdirSync(join(scratch.base, folder), { recursive: true });
+  return { base: scratch.base, runtime: scratch.libraries.runtime!.binary, environment, remove: scratch.remove };
 }
 
 /** The files of the home's processes folder, where a run that claimed the loader would have written its record. */

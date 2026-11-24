@@ -26,6 +26,14 @@ interface Probe {
   released: number;
   releasedWhileReading: number;
   asks: number;
+  /** The token of every `handle` call, in the order they came. */
+  readonly handled: bigint[];
+  /** The token of every `cancel` call that named a call still running. */
+  readonly cancelled: bigint[];
+}
+
+interface HandleInput {
+  readonly argument: { readonly request: { model: string; stream?: number }; readonly token: bigint };
 }
 
 const TEXT = 1;
@@ -35,6 +43,8 @@ const STREAM = 3;
 const EVENT = 1;
 const END = 2;
 const STREAM_FAILED = 3;
+const THROWN = 4;
+const HANG_HANDLE_BOUND = 10_000;
 
 async function optionalText(config: Config, key: string): Promise<string | undefined> {
   const answer = await config.get({ key });
@@ -85,6 +95,24 @@ function handled(mode: string, name: string, request: { model: string; stream?: 
   return stream(streamed(request.model, "partial").slice(0, 3), `${name} broke mid stream`);
 }
 
+/**
+ * A `hang-handle` call's answer once `cancel` named its token, as a provider whose upstream request was ended answers.
+ * @implNote It settles on its own after its wait, as a provider bounds its upstream wait, so a consumer that never
+ * cancels fails a test rather than hanging it.
+ */
+function cancelledCall(running: Map<bigint, () => void>, token: bigint): Promise<object> {
+  return new Promise((resolve) => {
+    const bound = setTimeout(() => {
+      running.delete(token);
+      resolve({ kind: THROWN, message: "never cancelled" });
+    }, HANG_HANDLE_BOUND);
+    running.set(token, () => {
+      clearTimeout(bound);
+      resolve({ kind: THROWN, message: "cancelled" });
+    });
+  });
+}
+
 /** @implNote A hanging stream's last `next` settles on its own after its wait, as a provider bounds its upstream wait. */
 async function next(input: { stream: Stream }): Promise<object> {
   const { stream } = input;
@@ -107,7 +135,8 @@ export default {
     const activateDelay = Number(await optionalText(config, "activateDelay"));
     const firstAskDelay = Number(await optionalText(config, "firstAskDelay"));
     const firstAskModel = (await optionalText(config, "firstAskModel")) ?? model;
-    const probe: Probe = { released: 0, releasedWhileReading: 0, asks: 0 };
+    const probe: Probe = { released: 0, releasedWhileReading: 0, asks: 0, handled: [], cancelled: [] };
+    const running = new Map<bigint, () => void>();
     let asks = 0;
     context.services.register(context.service(`${name}:probe`), probe);
     if (activateDelay > 0) await waited(activateDelay);
@@ -123,8 +152,19 @@ export default {
         const models = asks < emptyUntilAsk ? [] : [{ id, name: id }];
         return { provider: { provider: name, models, has_ranking: 0, default_model: model } };
       },
-      async handle(input: { argument: { request: { model: string; stream?: number } } }) {
-        return handled(mode, name, input.argument.request);
+      async handle(input: HandleInput) {
+        const { request, token } = input.argument;
+        probe.handled.push(token);
+        if (mode === "hang-handle") return cancelledCall(running, token);
+        return handled(mode, name, request);
+      },
+      async cancel(input: { argument: { token: bigint } }) {
+        const { token } = input.argument;
+        const end = running.get(token);
+        if (end === undefined) return;
+        running.delete(token);
+        probe.cancelled.push(token);
+        end();
       },
       next,
       release_stream(input: { stream: Stream }) {
