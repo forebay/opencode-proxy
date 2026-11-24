@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -43,8 +43,7 @@ export function installedOpencode(directory: string, version: OpencodeVersion): 
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "package.json"), JSON.stringify({ private: true }));
   const env = withVariables(process.env, { npm_config_cache: join(directory, "npm-cache"), npm_config_update_notifier: "false" });
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  execFileSync(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", `${version.package}@${version.version}`], { cwd: directory, env, stdio: "ignore", shell: process.platform === "win32" });
+  execSync(`npm install --ignore-scripts --no-audit --no-fund ${JSON.stringify(`${version.package}@${version.version}`)}`, { cwd: directory, env, stdio: "ignore" });
   const platform = PLATFORM_NAMES[process.platform] ?? process.platform;
   const binary = join(directory, "node_modules", `opencode-${platform}-${process.arch}`, "bin", process.platform === "win32" ? "opencode.exe" : "opencode");
   if (!existsSync(binary)) throw new Error(`the install of ${version.package}@${version.version} left no ${binary}`);
