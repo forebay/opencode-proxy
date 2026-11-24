@@ -1,7 +1,6 @@
 import type { Catalog, Snapshot } from "./catalog.js";
-import { PROVIDER_HANDLE, REPLY, REPORT, STEP } from "./kinds.js";
 import { Relay } from "./relay.js";
-import type { Anthropic, Handle, LogLine, Pair, Provider, ProviderHandleAnswer, Report, Routing, StepAnswer, StepArgument } from "./services.js";
+import type { Anthropic, Enums, Handle, LogLine, Pair, Provider, ProviderHandleAnswer, Report, Routing, StepAnswer, StepArgument } from "./services.js";
 import type { ProxySettings } from "./settings.js";
 import type { Outlet } from "./outlet.js";
 import { zoneAt } from "./zone.js";
@@ -9,6 +8,7 @@ import { zoneAt } from "./zone.js";
 export interface Walker {
   readonly routing: Routing;
   readonly anthropic: Anthropic;
+  readonly enums: Enums;
   readonly settings: ProxySettings;
   readonly catalog: Catalog;
   readonly writeLog: (lines: readonly LogLine[]) => void;
@@ -84,16 +84,16 @@ async function handled(exchange: Exchange, provider: Provider, model: string): P
     if (signal.aborted) cancel();
     return await pending;
   } catch (error) {
-    return { kind: PROVIDER_HANDLE.THROWN, message: messageOf(error) };
+    return { kind: exchange.walker.enums.provider.forebay_provider_handle_kind.FOREBAY_PROVIDER_HANDLE_THROWN, message: messageOf(error) };
   } finally {
     signal.removeEventListener("abort", cancel);
   }
 }
 
-function failureReport(failure: NonNullable<ProviderHandleAnswer["failure"]>): Report {
+function failureReport(failure: NonNullable<ProviderHandleAnswer["failure"]>, enums: Enums): Report {
   const { status, headers, has_retry_after, retry_after_milliseconds } = failure;
   const given = Object.entries({ headers, has_retry_after, retry_after_milliseconds }).filter(([, value]) => value !== undefined);
-  return { kind: REPORT.FAILURE, status, now: Date.now(), ...Object.fromEntries(given) };
+  return { kind: enums.routing.forebay_report_kind.FOREBAY_REPORT_FAILURE, status, now: Date.now(), ...Object.fromEntries(given) };
 }
 
 /**
@@ -103,17 +103,18 @@ function failureReport(failure: NonNullable<ProviderHandleAnswer["failure"]>): R
 async function called(exchange: Exchange, answer: StepAnswer): Promise<Report | undefined> {
   const provider = exchange.snapshot.byName.get(answer.provider!)!;
   const served = await handled(exchange, provider, answer.model!);
-  if (served.kind === PROVIDER_HANDLE.RESPONSE) {
+  const { enums } = exchange.walker;
+  if (served.kind === enums.provider.forebay_provider_handle_kind.FOREBAY_PROVIDER_HANDLE_RESPONSE) {
     const body = await exchange.walker.anthropic.encode_response({ argument: { response: served.response } });
     exchange.outlet.whole(body.status, body.headers, body.bytes);
-    return { kind: REPORT.RESPONSE };
+    return { kind: enums.routing.forebay_report_kind.FOREBAY_REPORT_RESPONSE };
   }
-  if (served.kind === PROVIDER_HANDLE.FAILURE) {
+  if (served.kind === enums.provider.forebay_provider_handle_kind.FOREBAY_PROVIDER_HANDLE_FAILURE) {
     exchange.failureBody = served.failure!.body ?? "";
-    return failureReport(served.failure!);
+    return failureReport(served.failure!, enums);
   }
-  if (served.kind === PROVIDER_HANDLE.STREAM) return exchange.relay.relayed(provider, served.stream);
-  return { kind: REPORT.THROWN, message: served.message ?? null };
+  if (served.kind === enums.provider.forebay_provider_handle_kind.FOREBAY_PROVIDER_HANDLE_STREAM) return exchange.relay.relayed(provider, served.stream);
+  return { kind: enums.routing.forebay_report_kind.FOREBAY_REPORT_THROWN, message: served.message ?? null };
 }
 
 async function rateLimited(exchange: Exchange, answer: StepAnswer): Promise<void> {
@@ -126,8 +127,8 @@ async function rateLimited(exchange: Exchange, answer: StepAnswer): Promise<void
 
 async function replied(exchange: Exchange, answer: StepAnswer): Promise<void> {
   const { outlet } = exchange;
-  if (answer.reply_kind === REPLY.RATE_LIMITED) return rateLimited(exchange, answer);
-  if (answer.reply_kind === REPLY.PROVIDER_FAILURE) {
+  if (answer.reply_kind === exchange.walker.enums.routing.forebay_reply_kind.FOREBAY_REPLY_RATE_LIMITED) return rateLimited(exchange, answer);
+  if (answer.reply_kind === exchange.walker.enums.routing.forebay_reply_kind.FOREBAY_REPLY_PROVIDER_FAILURE) {
     outlet.whole(answer.status, answer.headers, exchange.failureBody!);
     return;
   }
@@ -137,16 +138,17 @@ async function replied(exchange: Exchange, answer: StepAnswer): Promise<void> {
 
 /** Performs one step; answers the report it owes `step`, or undefined when the walk ends here. */
 async function performed(exchange: Exchange, answer: StepAnswer): Promise<Report | undefined> {
+  const step = exchange.walker.enums.routing.forebay_step_kind;
   switch (answer.kind) {
-    case STEP.PASS_THROUGH:
+    case step.FOREBAY_STEP_PASS_THROUGH:
       await exchange.walker.passThrough();
       return undefined;
-    case STEP.CALL_PROVIDER:
+    case step.FOREBAY_STEP_CALL_PROVIDER:
       return called(exchange, answer);
-    case STEP.REPLY:
+    case step.FOREBAY_STEP_REPLY:
       await replied(exchange, answer);
       return undefined;
-    case STEP.END_STREAM:
+    case step.FOREBAY_STEP_END_STREAM:
       await exchange.relay.endWithError(answer.error_type, answer.message);
       return undefined;
     default:
@@ -160,11 +162,11 @@ async function performed(exchange: Exchange, answer: StepAnswer): Promise<Report
  */
 export async function walk(walker: Walker, request: Walked, outlet: Outlet): Promise<void> {
   const { signal } = outlet;
-  const exchange: Exchange = { walker, request, outlet, relay: new Relay(walker.anthropic, outlet), snapshot: await walker.catalog.current(), refreshed: false };
+  const exchange: Exchange = { walker, request, outlet, relay: new Relay(walker.anthropic, walker.enums, outlet), snapshot: await walker.catalog.current(), refreshed: false };
   let answer = await stepped(exchange);
   try {
-    while (answer.kind !== STEP.DONE && !signal.aborted) {
-      if (answer.kind === STEP.REFRESH_MODELS) {
+    while (answer.kind !== walker.enums.routing.forebay_step_kind.FOREBAY_STEP_DONE && !signal.aborted) {
+      if (answer.kind === walker.enums.routing.forebay_step_kind.FOREBAY_STEP_REFRESH_MODELS) {
         exchange.snapshot = await walker.catalog.refreshed();
         exchange.refreshed = true;
         answer.walk?.release();

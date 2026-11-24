@@ -1,9 +1,9 @@
-import { FAILURE_REASON } from "./kinds.js";
 import { headersOf, pairsOf, type Outlet } from "./outlet.js";
-import type { Anthropic, LogLine, Routing } from "./services.js";
+import type { Anthropic, LogLine, Routing, RoutingEnums } from "./services.js";
 
 export interface PassThrough {
   readonly routing: Routing;
+  readonly enums: RoutingEnums;
   readonly anthropic: Anthropic;
   readonly upstream: unknown;
   readonly placeholderAuthorization: unknown;
@@ -33,7 +33,7 @@ async function sent(target: string, request: Undecoded, headers: Headers, signal
 }
 
 async function unreachable(through: PassThrough, outlet: Outlet, error: Error): Promise<void> {
-  const failure = await through.routing.failure({ argument: { reason: FAILURE_REASON.UPSTREAM_UNREACHABLE, upstream: through.upstream, detail: error.message } });
+  const failure = await through.routing.failure({ argument: { reason: through.enums.forebay_failure_reason.FOREBAY_UPSTREAM_UNREACHABLE, upstream: through.upstream, detail: error.message } });
   through.writeLog(failure.log);
   const body = await through.anthropic.error_envelope({ argument: { reply_kind: failure.reply_kind, message: failure.message } });
   outlet.whole(failure.status, body.headers, body.bytes);

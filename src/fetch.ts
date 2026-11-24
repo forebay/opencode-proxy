@@ -1,14 +1,14 @@
 import type { Catalog } from "./catalog.js";
-import { FAILURE_REASON, ROUTE } from "./kinds.js";
 import { BodyTooLarge, bodyOf, Outlet, pairsOf } from "./outlet.js";
 import { passThrough, type Undecoded } from "./pass-through.js";
-import type { Anthropic, Body, LimitsAnswer, LogLine, Routing } from "./services.js";
+import type { Anthropic, Body, Enums, LimitsAnswer, LogLine, Routing } from "./services.js";
 import type { ProxySettings } from "./settings.js";
 import { walk, type Walked } from "./walk.js";
 
 export interface Proxy {
   readonly routing: Routing;
   readonly anthropic: Anthropic;
+  readonly enums: Enums;
   readonly settings: ProxySettings;
   readonly limits: LimitsAnswer;
   readonly catalog: Catalog;
@@ -63,17 +63,17 @@ function pathOf(request: Request): string {
 async function routed(proxy: Proxy, request: Request, outlet: Outlet): Promise<void> {
   const path = pathOf(request);
   const route = await proxy.anthropic.route_request({ argument: { method: request.method, path } });
-  if (route.kind === ROUTE.MODEL_LIST || route.kind === ROUTE.MODEL_LOOKUP) {
-    await models(proxy, outlet, route.kind === ROUTE.MODEL_LOOKUP ? route.model_id! : undefined);
+  if (route.kind === proxy.enums.anthropic.forebay_anthropic_route_kind.FOREBAY_ANTHROPIC_ROUTE_MODEL_LIST || route.kind === proxy.enums.anthropic.forebay_anthropic_route_kind.FOREBAY_ANTHROPIC_ROUTE_MODEL_LOOKUP) {
+    await models(proxy, outlet, route.kind === proxy.enums.anthropic.forebay_anthropic_route_kind.FOREBAY_ANTHROPIC_ROUTE_MODEL_LOOKUP ? route.model_id! : undefined);
     return;
   }
   const body = await bodyOf(request, proxy.limits.max_request_bytes);
-  const walked = route.kind === ROUTE.MESSAGES ? await decoded(proxy, request, body, outlet) : { headers: pairsOf(request.headers), model: null, passThrough: true };
+  const walked = route.kind === proxy.enums.anthropic.forebay_anthropic_route_kind.FOREBAY_ANTHROPIC_ROUTE_MESSAGES ? await decoded(proxy, request, body, outlet) : { headers: pairsOf(request.headers), model: null, passThrough: true };
   if (walked === undefined) return;
   const { upstream, placeholderAuthorization } = proxy.settings;
-  const through = { routing: proxy.routing, anthropic: proxy.anthropic, upstream, placeholderAuthorization, keyHeaders: route.key_headers ?? [], writeLog: proxy.writeLog };
+  const through = { routing: proxy.routing, enums: proxy.enums.routing, anthropic: proxy.anthropic, upstream, placeholderAuthorization, keyHeaders: route.key_headers ?? [], writeLog: proxy.writeLog };
   const undecoded: Undecoded = { method: request.method, url: path, headers: request.headers, body };
-  const walker = { routing: proxy.routing, anthropic: proxy.anthropic, settings: proxy.settings, catalog: proxy.catalog, writeLog: proxy.writeLog, passThrough: () => passThrough(through, undecoded, outlet) };
+  const walker = { routing: proxy.routing, anthropic: proxy.anthropic, enums: proxy.enums, settings: proxy.settings, catalog: proxy.catalog, writeLog: proxy.writeLog, passThrough: () => passThrough(through, undecoded, outlet) };
   await walk(walker, walked, outlet);
 }
 
@@ -83,7 +83,7 @@ async function tooLarge(proxy: Proxy, outlet: Outlet): Promise<void> {
 }
 
 async function failed(proxy: Proxy, outlet: Outlet, error: unknown): Promise<void> {
-  const failure = await proxy.routing.failure({ argument: { reason: FAILURE_REASON.REQUEST_FAILED, detail: messageOf(error) } });
+  const failure = await proxy.routing.failure({ argument: { reason: proxy.enums.routing.forebay_failure_reason.FOREBAY_REQUEST_FAILED, detail: messageOf(error) } });
   proxy.writeLog(failure.log);
   await envelope(proxy, outlet, failure.status, failure.reply_kind, failure.message);
 }

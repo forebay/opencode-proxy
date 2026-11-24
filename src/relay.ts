@@ -1,17 +1,18 @@
-import { IR_EVENT_ERROR, PROVIDER_NEXT, REPORT } from "./kinds.js";
-import type { Anthropic, Body, Handle, Provider, ProviderNextAnswer, Report } from "./services.js";
+import type { Anthropic, Body, Enums, Handle, Provider, ProviderEnums, ProviderNextAnswer, Report } from "./services.js";
 import type { Outlet } from "./outlet.js";
 
 /** One request's stream to OpenCode: the encoder C keeps one provider's stream state in, and whether a byte went out. */
 export class Relay {
   readonly #anthropic: Anthropic;
+  readonly #enums: Enums;
   readonly #outlet: Outlet;
   readonly #signal: AbortSignal;
   #encoder: Handle | undefined;
   #wrote = false;
 
-  constructor(anthropic: Anthropic, outlet: Outlet) {
+  constructor(anthropic: Anthropic, enums: Enums, outlet: Outlet) {
     this.#anthropic = anthropic;
+    this.#enums = enums;
     this.#outlet = outlet;
     this.#signal = outlet.signal;
   }
@@ -28,19 +29,19 @@ export class Relay {
     try {
       this.#encoder ??= await this.#anthropic.stream_encoder_open({});
       while (!this.#signal.aborted) {
-        pending = nextOf(provider, stream);
+        pending = nextOf(provider, stream, this.#enums.provider);
         const next = await this.#unlessGone(pending);
         if (next === undefined) return undefined;
         pending = undefined;
-        if (next.kind === PROVIDER_NEXT.EVENT) {
+        if (next.kind === this.#enums.provider.forebay_provider_next_kind.FOREBAY_PROVIDER_NEXT_EVENT) {
           await this.#written((encoder) => this.#anthropic.stream_encode({ argument: { encoder, events: [next.event] } }));
-        } else if (next.kind === PROVIDER_NEXT.END) {
+        } else if (next.kind === this.#enums.provider.forebay_provider_next_kind.FOREBAY_PROVIDER_NEXT_END) {
           await this.#written((encoder) => this.#anthropic.stream_encode_finish({ argument: { encoder, events: [] } }));
           this.#outlet.end();
-          return { kind: REPORT.STREAMED };
+          return { kind: this.#enums.routing.forebay_report_kind.FOREBAY_REPORT_STREAMED };
         } else {
           if (!this.#wrote) this.release();
-          return { kind: REPORT.STREAM_FAILED, after_bytes: this.#wrote ? 1 : 0, message: next.failure ?? null };
+          return { kind: this.#enums.routing.forebay_report_kind.FOREBAY_REPORT_STREAM_FAILED, after_bytes: this.#wrote ? 1 : 0, message: next.failure ?? null };
         }
       }
       return undefined;
@@ -52,7 +53,7 @@ export class Relay {
 
   /** Writes the IR error event C names after a stream failed past its first byte, and ends the stream. */
   async endWithError(errorType: string | undefined, message: string | undefined): Promise<void> {
-    const event = { kind: IR_EVENT_ERROR, error_type: errorType ?? null, message: message ?? null };
+    const event = { kind: this.#enums.anthropic.forebay_ir_event_kind.FOREBAY_IR_EVENT_ERROR, error_type: errorType ?? null, message: message ?? null };
     try {
       await this.#written((encoder) => this.#anthropic.stream_encode({ argument: { encoder, events: [event] } }));
     } finally {
@@ -88,8 +89,8 @@ export class Relay {
   }
 }
 
-function nextOf(provider: Provider, stream: unknown): Promise<ProviderNextAnswer> {
-  return provider.next({ stream }).catch((error: unknown) => ({ kind: PROVIDER_NEXT.FAILURE, failure: error instanceof Error ? error.message : String(error) }));
+function nextOf(provider: Provider, stream: unknown, enums: ProviderEnums): Promise<ProviderNextAnswer> {
+  return provider.next({ stream }).catch((error: unknown) => ({ kind: enums.forebay_provider_next_kind.FOREBAY_PROVIDER_NEXT_FAILURE, failure: error instanceof Error ? error.message : String(error) }));
 }
 
 /** Frees the stream through the contract's `release_stream` when the provider offers it, or a handle's own release. */
