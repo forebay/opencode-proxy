@@ -259,6 +259,16 @@ describe("opencode-proxy's hooks under the host program, over runtime in a tempo
     expect(upstream.received[0]?.headers["x-api-key"]).toBeUndefined();
   }, RUN_BOUND);
 
+  it("answers C's 404 for a model id whose escape is malformed", async () => {
+    const run = await started([proxyInstall(), providerInstall("alpha", "plain")]);
+    const { provider } = await configured(run);
+
+    const answer = await provider.options.fetch(`${provider.options.baseURL}/models/%E0%A4`, { method: "GET" });
+
+    expect(answer.status).toBe(404);
+    expect(await answer.json()).toMatchObject({ type: "error", error: { type: "not_found_error" } });
+  }, RUN_BOUND);
+
   it("answers a compressed upstream reply plain, with neither its content-encoding nor its content-length", async () => {
     const compressing = await fakeUpstream(true);
     try {
