@@ -61,7 +61,7 @@ async function routed(proxy: Proxy, request: Request, outlet: Outlet): Promise<v
   const walked = route.kind === ROUTE.MESSAGES ? await decoded(proxy, request, body, outlet) : { headers: pairsOf(request.headers), model: null, passThrough: true };
   if (walked === undefined) return;
   const { upstream, placeholderAuthorization } = proxy.settings;
-  const through = { routing: proxy.routing, anthropic: proxy.anthropic, upstream, placeholderAuthorization, writeLog: proxy.writeLog };
+  const through = { routing: proxy.routing, anthropic: proxy.anthropic, upstream, placeholderAuthorization, keyHeaders: route.key_headers ?? [], writeLog: proxy.writeLog };
   const undecoded: Undecoded = { method: request.method, url: path, headers: request.headers, body };
   const walker = { routing: proxy.routing, anthropic: proxy.anthropic, settings: proxy.settings, catalog: proxy.catalog, writeLog: proxy.writeLog, passThrough: () => passThrough(through, undecoded, outlet) };
   await walk(walker, walked, outlet);

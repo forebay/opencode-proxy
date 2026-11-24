@@ -7,6 +7,7 @@ export interface PassThrough {
   readonly anthropic: Anthropic;
   readonly upstream: unknown;
   readonly placeholderAuthorization: unknown;
+  readonly keyHeaders: readonly string[];
   readonly writeLog: (lines: readonly LogLine[]) => void;
 }
 
@@ -60,7 +61,14 @@ async function relayed(body: ReadableStream<Uint8Array>, outlet: Outlet): Promis
  * content-encoding and content-length, which no longer describe the bytes relayed.
  */
 export async function passThrough(through: PassThrough, request: Undecoded, outlet: Outlet): Promise<void> {
-  const argument = { upstream: through.upstream, url: request.url, headers: pairsOf(request.headers), body_length: request.body.length, placeholder_authorization: through.placeholderAuthorization };
+  const argument = {
+    upstream: through.upstream,
+    url: request.url,
+    headers: pairsOf(request.headers),
+    body_length: request.body.length,
+    placeholder_authorization: through.placeholderAuthorization,
+    placeholder_key_headers: through.keyHeaders,
+  };
   const routed = await through.routing.pass_through({ argument });
   const answered = await sent(routed.target, request, headersOf(routed.headers), outlet.signal);
   if (outlet.signal.aborted) return;

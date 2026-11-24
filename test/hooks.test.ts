@@ -240,6 +240,22 @@ describe("opencode-proxy's hooks under the host program, over runtime in a tempo
     expect(provider.models).toEqual({});
   }, RUN_BOUND);
 
+  it.each([
+    ["the whole placeholder", (placeholder: string) => placeholder],
+    ["the bare key", (placeholder: string) => placeholder.replace(/^Bearer /, "")],
+  ])("passes a request no route serves through without an x-api-key carrying %s", async (_form, keyOf) => {
+    const run = await started([proxyInstall(), providerInstall("alpha", "plain")]);
+    const { provider } = await configured(run);
+    const headers = { "content-type": "application/json", "x-api-key": keyOf(placeholderAuthorization()) };
+
+    const answer = await provider.options.fetch(`${provider.options.baseURL}/messages/count_tokens`, { method: "POST", headers, body: MESSAGES });
+
+    expect(answer.status).toBe(200);
+    expect(upstream.received).toHaveLength(1);
+    expect(upstream.received[0]?.url).toBe("/v1/messages/count_tokens");
+    expect(upstream.received[0]?.headers["x-api-key"]).toBeUndefined();
+  }, RUN_BOUND);
+
   it("answers a compressed upstream reply plain, with neither its content-encoding nor its content-length", async () => {
     const compressing = await fakeUpstream(true);
     try {
