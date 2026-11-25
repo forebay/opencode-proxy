@@ -125,7 +125,7 @@ afterAll(() => bundles?.remove());
 
 afterEach(async () => {
   const records: string[] = [];
-  for (const run of running.splice(0)) {
+  for (const run of running.splice(0).reverse()) {
     try {
       await run.host.stop();
       records.push(...processRecords(run.home));

@@ -140,7 +140,7 @@ beforeAll(async () => {
 }, SETUP_BOUND);
 
 afterEach(() => {
-  for (const finished of scratches.splice(0)) finished.home.remove();
+  for (const finished of scratches.splice(0).reverse()) finished.home.remove();
 }, TEARDOWN_BOUND);
 
 afterAll(() => root?.remove());
