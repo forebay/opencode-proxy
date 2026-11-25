@@ -54,8 +54,9 @@ model map goes under `routing.modelMap`, each slot a list of `{provider, model}`
 
 ## Testing
 
-`npm test` builds forebay-library's `forebay_library` and spisor/library's `runtime` with CMake into `native/`
-(`scripts/native.ts`), builds and type-checks, and runs vitest.
+`npm test` builds forebay-library's `forebay_library` and spisor/library's `runtime` and test-only `runtime_testing`
+with CMake into `native/` (`scripts/native.ts`), builds and type-checks, and runs vitest. Every temporary home is laid
+out by `runtime_testing` through runtime's own writers, so its layout has one owner in C.
 
 - `test/hooks.test.ts` lays out a temporary home with the four `SPISOR_*` places under it, installs the proxy and the
   test provider of `test/fixtures/provider/` into it, runs `runtime` under weivel/typescript's `startHost` in process,

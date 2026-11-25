@@ -1,13 +1,13 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { bundlePlugin } from "@weivel/typescript/bundle";
-import { scratchHome, type PlacedLibrary, type ScratchFile } from "@weivel/typescript/testing";
+import type { BoundDefinition } from "@weivel/typescript/host";
+import { describedLibrary, scratchHome, setVariables, type DescribedLibrary, type PlacedLibrary } from "@weivel/typescript/testing";
 
 export const REPOSITORY = resolve(import.meta.dirname, "..", "..");
 export const HOST_ID = "test-host";
 
 const NATIVE = join(REPOSITORY, "native");
-const FOLDERS = ["user", "portable", "secrets", "koffi"];
 
 /** One plugin to install: its manifest, the bundled entry to place where the manifest names it, and its stored settings. */
 export interface Install {
@@ -22,76 +22,75 @@ export type Variables = (base: string) => Readonly<Record<string, string>>;
 export interface Home {
   readonly base: string;
   readonly runtime: string;
+  /** The folder a run that claimed the loader writes its record in. */
+  readonly processes: string;
   /** Every variable the home set in the process while it lives. */
   readonly environment: Readonly<Record<string, string>>;
   /** Puts the process's variables back as they were and deletes the home. */
   remove(): void;
 }
 
-function placesOf(base: string): Record<string, string> {
-  return {
-    SPISOR_HOME: join(base, "portable"),
-    SPISOR_STATE: join(base, "state"),
-    SPISOR_CACHE: join(base, "cache"),
-    SPISOR_SECRETS: join(base, "secrets"),
-    HOME: join(base, "user"),
-    USERPROFILE: join(base, "user"),
-  };
+interface LaidOutHome {
+  readonly variables: readonly { readonly name: string; readonly value: string }[];
+  readonly processes: string;
 }
 
-function installedFiles(base: string, install: Install): ScratchFile[] {
-  const { id, version, entry } = install.manifest;
-  const bundle = join(base, "cache", "bundles", id, version);
-  return [
-    { path: join(bundle, "plugin.json"), content: install.manifest },
-    { path: join(bundle, entry), copyFrom: install.bundle },
-    { path: join(bundle, ".installed.json"), content: { files: {} } },
-    { path: join(base, "application", "config", `${id}.json`), content: install.settings },
-  ];
+let runtimeTesting: DescribedLibrary | undefined;
+
+/** runtime-testing's service, the test-only C library that lays a home out through runtime's own writers, loaded once. */
+function testingService(): BoundDefinition {
+  runtimeTesting ??= describedLibrary(join(NATIVE, "runtime_testing"));
+  return runtimeTesting.described.get("runtime.testing")!;
 }
 
-/** The files an install leaves: the registered loader, the javascript-host's hint naming the libraries, every install enabled. */
-function homeFiles(base: string, libraries: Readonly<Record<string, PlacedLibrary>>, installs: readonly Install[]): ScratchFile[] {
-  const catalog = join(base, "catalog", "index.json");
-  const enabled = Object.fromEntries(installs.map((install) => [install.manifest.id, { enabled: true }]));
-  const hint = {
-    host: "2.0.0",
-    libraries: {
-      runtime: { version: "0.2.0", ...libraries.runtime },
-      koffi: { version: "2.0.0", directory: join(base, "koffi") },
-      "forebay-library": { version: "0.2.0", ...libraries.forebay_library },
-    },
+function hintedLibrary(id: string, placed: PlacedLibrary): Record<string, unknown> {
+  return { id, version: null, directory: placed.directory, binary: placed.binary };
+}
+
+/** Lays the home out with no processes record: a run started `in-process` neither claims nor checks one. */
+function layOutHome(base: string, libraries: Readonly<Record<string, PlacedLibrary>>, installs: readonly Install[]): Promise<LaidOutHome> {
+  const argument = {
+    base,
+    host_id: HOST_ID,
+    installs: installs.map((install) => ({ manifest: install.manifest, entry_source: install.bundle, settings: install.settings })),
+    libraries: [hintedLibrary("runtime", libraries.runtime!), hintedLibrary("forebay-library", libraries.forebay_library!)],
+    holder: 0,
   };
-  return [
-    { path: catalog, content: { format: 1, items: {} } },
-    { path: join(base, "state", "hosts", `${HOST_ID}.json`), content: { id: HOST_ID, kind: "host", version: "1.0.0", home: join(base, "application") } },
-    { path: join(base, "cache", "hosts", "javascript-host.json"), content: hint },
-    ...installs.flatMap((install) => installedFiles(base, install)),
-    { path: join(base, "application", "config", "settings.json"), content: { plugins: enabled, catalog: { sources: [{ kind: "local", path: catalog }] } } },
-  ];
+  return testingService().lay_out_home!({ argument }) as Promise<LaidOutHome>;
 }
 
 /**
- * Lays out a fresh home under the temporary directory, as an install leaves one, with runtime and forebay-library out
- * of `native/` and spisor's places, then `variables`, set until `remove`. No processes record is written: a run
- * started `in-process` neither claims nor checks one.
+ * Lays out a fresh home under the temporary directory through runtime-testing, as an install leaves one, with runtime
+ * and forebay-library out of `native/`, and sets spisor's places, then `variables`, until `remove`.
  */
-export function homeWith(installs: readonly Install[], variables: Variables = () => ({})): Home {
-  let environment: Readonly<Record<string, string>> = {};
+export async function homeWith(installs: readonly Install[], variables: Variables = () => ({})): Promise<Home> {
   const scratch = scratchHome({
     prefix: "ocp-home-",
     libraries: { runtime: join(NATIVE, "runtime"), forebay_library: join(NATIVE, "forebay_library") },
-    environment: (base) => (environment = { ...placesOf(base), ...variables(base) }),
-    files: (base, libraries) => homeFiles(base, libraries, installs),
+    environment: () => ({}),
+    files: () => [],
   });
-  for (const folder of FOLDERS) mkdirSync(join(scratch.base, folder), { recursive: true });
-  return { base: scratch.base, runtime: scratch.libraries.runtime!.binary, environment, remove: scratch.remove };
+  try {
+    const base = join(scratch.base, "home");
+    mkdirSync(base);
+    const laidOut = await layOutHome(base, scratch.libraries, installs);
+    const places = Object.fromEntries(laidOut.variables.map((variable) => [variable.name, variable.value]));
+    const environment = { ...places, ...variables(base) };
+    const restore = setVariables(environment);
+    const remove = (): void => {
+      restore();
+      scratch.remove();
+    };
+    return { base, runtime: scratch.libraries.runtime!.binary, processes: laidOut.processes, environment, remove };
+  } catch (error) {
+    scratch.remove();
+    throw error;
+  }
 }
 
 /** The files of the home's processes folder, where a run that claimed the loader would have written its record. */
 export function processRecords(home: Home): string[] {
-  const folder = join(home.base, "state", "processes");
-  return existsSync(folder) ? readdirSync(folder) : [];
+  return existsSync(home.processes) ? readdirSync(home.processes) : [];
 }
 
 /** Bundles a plugin entry into one module, as a plugin's build does, under `directory`. */

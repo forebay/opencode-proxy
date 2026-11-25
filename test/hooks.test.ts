@@ -76,7 +76,7 @@ function providerInstall(id: string, mode: string, settings: Record<string, unkn
 }
 
 async function started(installs: readonly Install[]): Promise<Running> {
-  const home = homeWith(installs);
+  const home = await homeWith(installs);
   const quiet = (): void => undefined;
   const host = await startHost({ hostLibraryPath: home.runtime, arguments: [HOST_ID, "in-process"], log: { debug: quiet, info: quiet, warn: quiet, error: quiet } });
   const run = { home, host };

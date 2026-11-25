@@ -67,8 +67,8 @@ function configDirectoryOf(base: string): string {
 }
 
 /** A runtime home with the proxy and one test provider installed, and OpenCode's folders isolated under it. */
-function scratch(): Scratch {
-  const home = homeWith([proxyInstall(), providerInstall("alpha")], (base) => isolatedEnvironment(opencodeFolder(base), configDirectoryOf(base)));
+async function scratch(): Promise<Scratch> {
+  const home = await homeWith([proxyInstall(), providerInstall("alpha")], (base) => isolatedEnvironment(opencodeFolder(base), configDirectoryOf(base)));
   const opencode = opencodeFolder(home.base);
   const configDirectory = configDirectoryOf(home.base);
   const project = join(opencode, "project");
@@ -147,7 +147,7 @@ afterAll(() => root?.remove());
 
 describe(`opencode-proxy inside OpenCode ${opencodeVersion().version}, whose own process hosts it`, () => {
   it("lists the provider's models, answers two runs in one home through it, and leaves no socket, credential or real-home file behind", async () => {
-    const within = scratch();
+    const within = await scratch();
 
     const listed = await opencode(within, ["models", PROVIDER_ID]);
     const first = await opencode(within, ["run", "-m", `${PROVIDER_ID}/${MODEL}`, "say hi"]);
@@ -160,7 +160,7 @@ describe(`opencode-proxy inside OpenCode ${opencodeVersion().version}, whose own
   }, RUN_BOUND);
 
   it("serves two OpenCode processes started together in one home OpenCode already set up", async () => {
-    const within = scratch();
+    const within = await scratch();
 
     const warmed = await opencode(within, ["models", PROVIDER_ID]);
     const asked = ["run", "-m", `${PROVIDER_ID}/${MODEL}`, "say hi"];
